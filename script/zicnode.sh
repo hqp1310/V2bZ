@@ -6,6 +6,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
+repo="kutycma/zicnode"
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Lỗi:${plain} Bắt buộc phải sử dụng người dùng root để chạy script này!\n" && exit 1
@@ -107,7 +108,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/${repo}/main/script/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -123,7 +124,7 @@ update() {
     else
         version=$2
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh) $version
+    bash <(curl -Ls https://raw.githubusercontent.com/${repo}/main/script/install.sh) $version
     if [[ $? == 0 ]]; then
         echo -e "${green}Cập nhật hoàn tất, đã tự động khởi động lại zicnode, vui lòng dùng lệnh 'zicnode log' để xem nhật ký hoạt động${plain}"
         exit
@@ -307,7 +308,7 @@ show_log() {
 }
 
 update_shell() {
-    wget -O /usr/bin/zicnode -N --no-check-certificate https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/zicnode.sh
+    wget -O /usr/bin/zicnode -N --no-check-certificate https://raw.githubusercontent.com/${repo}/main/script/zicnode.sh
     if [[ $? != 0 ]]; then
         echo ""
         echo -e "${red}Tải xuống script thất bại, vui lòng kiểm tra kết nối tới GitHub${plain}"
@@ -513,7 +514,7 @@ show_usage() {
 show_menu() {
     echo -e "
   ${green}Script quản trị đầu cuối ZicNode,${plain} ${red}không áp dụng cho docker${plain}
---- https://github.com/ZicBoard/ZicNode ---
+--- https://github.com/kutycma/zicnode ---
   ${green}0.${plain} Sửa đổi cấu hình (config.json)
 ——————————————
   ${green}1.${plain} Cài đặt zicnode

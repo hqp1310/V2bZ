@@ -1,11 +1,13 @@
 #!/bin/bash
+set -o pipefail
 
 red='\033[0;31m'
-green='\033[0;32'
+green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
+repo="kutycma/zicnode"
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Lỗi:${plain} Bắt buộc phải sử dụng người dùng root để chạy script này!\n" && exit 1
@@ -267,22 +269,22 @@ install_zicnode() {
     cd /usr/local/zicnode/
 
     if  [[ -z "$version_param" ]] ; then
-        last_version=$(curl -Ls "https://api.github.com/repos/ZicBoard/ZicNode/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        last_version=$(curl -Ls "https://api.github.com/repos/${repo}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}Phát hiện phiên bản zicnode thất bại, có thể đã vượt quá giới hạn GitHub API, vui lòng thử lại sau, hoặc chỉ định phiên bản cài đặt thủ công${plain}"
+            echo -e "${red}Phát hiện phiên bản zicnode thất bại: repo ${repo} chưa có GitHub Release mới nhất hoặc GitHub API đang giới hạn. Vui lòng tạo release hoặc chỉ định phiên bản cài đặt thủ công.${plain}"
             exit 1
         fi
         echo -e "${green}Phát hiện phiên bản mới nhất: ${last_version}, bắt đầu cài đặt...${plain}"
-        url="https://github.com/ZicBoard/ZicNode/releases/download/${last_version}/zicnode-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "Tiến trình tải" > /usr/local/zicnode/zicnode-linux.zip
+        url="https://github.com/${repo}/releases/download/${last_version}/zicnode-linux-${arch}.zip"
+        curl -fsL "$url" | pv -s 30M -W -N "Tiến trình tải" > /usr/local/zicnode/zicnode-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}Tải xuống zicnode thất bại, vui lòng đảm bảo máy chủ của bạn có thể tải xuống tệp tin từ GitHub${plain}"
             exit 1
         fi
     else
     last_version=$version_param
-        url="https://github.com/ZicBoard/ZicNode/releases/download/${last_version}/zicnode-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "Tiến trình tải" > /usr/local/zicnode/zicnode-linux.zip
+        url="https://github.com/${repo}/releases/download/${last_version}/zicnode-linux-${arch}.zip"
+        curl -fsL "$url" | pv -s 30M -W -N "Tiến trình tải" > /usr/local/zicnode/zicnode-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}Tải xuống zicnode phiên bản $1 thất bại, vui lòng đảm bảo phiên bản này tồn tại${plain}"
             exit 1
@@ -375,7 +377,7 @@ EOF
     fi
 
 
-    curl -o /usr/bin/zicnode -Ls https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/zicnode.sh
+    curl -o /usr/bin/zicnode -Ls https://raw.githubusercontent.com/${repo}/main/script/zicnode.sh
     chmod +x /usr/bin/zicnode
 
     cd $cur_dir

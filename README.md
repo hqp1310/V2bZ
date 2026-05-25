@@ -9,7 +9,7 @@ Một backend của ZicBoard dựa trên mã nguồn xray-core đã được ch�
 ### Cài đặt nhanh bằng 1 click
 
 ```bash
-wget -N https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/kutycma/zicnode/main/script/install.sh && bash install.sh
 ```
 
 ## Biên dịch (Build)
@@ -19,4 +19,4 @@ GOEXPERIMENT=jsonv2 go build -v -o build_assets/zicnode -trimpath -ldflags "-X '
 
 ## Lịch sử Stars
 
-[![Stargazers over time](https://starchart.cc/ZicBoard/ZicNode.svg?variant=adaptive)](https://starchart.cc/ZicBoard/ZicNode)
+[![Stargazers over time](https://starchart.cc/kutycma/zicnode.svg?variant=adaptive)](https://starchart.cc/kutycma/zicnode)

@@ -21,7 +21,7 @@ Mã khóa bí mật dùng để xác thực và mã hóa luồng dữ liệu tru
 ### 1.3. Mã số nhận dạng Node (Node ID)
 Bạn cần tạo mới một bản ghi Node trên giao diện quản trị để cấp phát ID:
 *   *Cách tạo:* Truy cập Admin ZicBoard -> **Quản lý Node** -> **Thêm Node**.
-*   *Loại Node (Type):* Chọn giao thức kết nối là `zicnode` hoặc `v2node`.
+*   *Loại Node (Type):* Chọn giao thức kết nối là `zicnode`.
 *   *Nhận ID:* Sau khi lưu cấu hình, hệ thống sẽ cấp một ID dạng số nguyên cho Node của bạn (ví dụ: `1`, `2`, `3`...). Vui lòng ghi nhớ ID này.
 
 ---
@@ -35,12 +35,12 @@ Hãy truy cập vào VPS Backend của bạn bằng quyền SSH (người dùng 
 Phương pháp này tự động thực hiện tải xuống, giải nén và cấu hình ZicNode chỉ trong 1 dòng lệnh mà không yêu cầu nhập thủ công bất kỳ câu hỏi nào:
 
 ```bash
-wget -N https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh && bash install.sh --api-host <Địa_chỉ_API_ZicBoard> --node-id <ID_Node> --api-key <Mã_Server_Token>
+wget -N https://raw.githubusercontent.com/kutycma/zicnode/main/script/install.sh && bash install.sh --api-host <Địa_chỉ_API_ZicBoard> --node-id <ID_Node> --api-key <Mã_Server_Token>
 ```
 
 *Ví dụ thực tế:*
 ```bash
-wget -N https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh && bash install.sh --api-host https://panel.example.com/ --node-id 1 --api-key mysecrettoken123
+wget -N https://raw.githubusercontent.com/kutycma/zicnode/main/script/install.sh && bash install.sh --api-host https://panel.example.com/ --node-id 1 --api-key mysecrettoken123
 ```
 
 ---
@@ -49,7 +49,7 @@ wget -N https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install
 
 Nếu bạn chạy lệnh cài đặt tiêu chuẩn:
 ```bash
-wget -N https://raw.githubusercontent.com/ZicBoard/ZicNode/master/script/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/kutycma/zicnode/main/script/install.sh && bash install.sh
 ```
 
 Hệ thống sẽ tải phiên bản mới nhất và đưa ra các câu hỏi tương tác bằng tiếng Việt sau đây (đã được dịch toàn bộ từ tiếng Trung):
