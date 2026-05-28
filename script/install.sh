@@ -400,7 +400,6 @@ EOF
     echo "zicnode uninstall    - Gỡ cài đặt zicnode"
     echo "zicnode version      - Xem phiên bản zicnode"
     echo "------------------------------------------"
-    curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
     if [[ $first_install == true ]]; then
         read -rp "Phát hiện đây là lần đầu tiên bạn cài đặt zicnode, bạn có muốn tự động tạo tệp cấu hình /etc/zicnode/config.json không? (y/n): " if_generate
