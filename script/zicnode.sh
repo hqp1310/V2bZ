@@ -430,7 +430,7 @@ generate_zicnode_config() {
         cat > /etc/zicnode/config.json <<EOF
 {
     "Log": {
-        "Level": "debug",
+        "Level": "info",
         "Output": "",
         "Access": ""
     },
