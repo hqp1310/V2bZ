@@ -33,9 +33,9 @@ type NodeConfig struct {
 func New() *Conf {
 	return &Conf{
 		LogConfig: LogConfig{
-			Level:  "info",
+			Level:  "debug",
 			Output: "",
-			Access: "none",
+			Access: "",
 		},
 	}
 }

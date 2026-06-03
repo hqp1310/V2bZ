@@ -229,9 +229,9 @@ generate_zicnode_config() {
         cat > /etc/zicnode/config.json <<EOF
 {
     "Log": {
-        "Level": "warning",
+        "Level": "debug",
         "Output": "",
-        "Access": "none"
+        "Access": ""
     },
     "Nodes": [
         {

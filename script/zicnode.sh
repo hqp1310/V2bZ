@@ -137,7 +137,7 @@ update() {
 
 config() {
     echo "zicnode sẽ tự động thử khởi động lại sau khi sửa đổi cấu hình"
-    vi /etc/zicnode/config.json
+    nano /etc/zicnode/config.json
     sleep 2
     restart
     check_status
@@ -430,9 +430,9 @@ generate_zicnode_config() {
         cat > /etc/zicnode/config.json <<EOF
 {
     "Log": {
-        "Level": "warning",
+        "Level": "debug",
         "Output": "",
-        "Access": "none"
+        "Access": ""
     },
     "Nodes": [
         {
