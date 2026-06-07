@@ -55,6 +55,8 @@ type CommonNode struct {
 	ZeroRTTHandshake  bool   `json:"zero_rtt_handshake"`
 	//anytls
 	PaddingScheme []string `json:"padding_scheme,omitempty"`
+	//warp outbound
+	WarpSettings WarpSettings `json:"warp_settings"`
 	//hysteria hysteria2
 	UpMbps                  int    `json:"up_mbps"`
 	DownMbps                int    `json:"down_mbps"`
@@ -77,6 +79,19 @@ type BaseConfig struct {
 	PullInterval           any    `json:"pull_interval"`
 	DeviceOnlineMinTraffic int    `json:"device_online_min_traffic"`
 	NodeReportMinTraffic   int    `json:"node_report_min_traffic"`
+}
+
+type WarpSettings struct {
+	Enable         bool     `json:"enable"`
+	Mode           string   `json:"mode"`
+	FailPolicy     string   `json:"fail_policy"`
+	MTU            int      `json:"mtu"`
+	DomainStrategy string   `json:"domain_strategy"`
+	PrivateKey     string   `json:"private_key"`
+	PeerPublicKey  string   `json:"peer_public_key"`
+	Endpoint       string   `json:"endpoint"`
+	Addresses      []string `json:"addresses"`
+	Reserved       []byte   `json:"reserved"`
 }
 
 type TlsSettings struct {
@@ -143,6 +158,7 @@ func (c *CommonNode) UnmarshalJSON(data []byte) error {
 		CongestionControl     json.RawMessage `json:"congestion_control"`
 		ZeroRTTHandshake      json.RawMessage `json:"zero_rtt_handshake"`
 		PaddingScheme         json.RawMessage `json:"padding_scheme"`
+		WarpSettings          json.RawMessage `json:"warp_settings"`
 		UpMbps                json.RawMessage `json:"up_mbps"`
 		DownMbps              json.RawMessage `json:"down_mbps"`
 		Obfs                  json.RawMessage `json:"obfs"`
@@ -160,6 +176,10 @@ func (c *CommonNode) UnmarshalJSON(data []byte) error {
 	var encryptionSettings EncSettings
 	if err := unmarshalFlexibleObject(raw.EncryptionSettings, &encryptionSettings); err != nil {
 		return fmt.Errorf("decode encryption_settings error: %s", err)
+	}
+	var warpSettings WarpSettings
+	if err := unmarshalFlexibleObject(raw.WarpSettings, &warpSettings); err != nil {
+		return fmt.Errorf("decode warp_settings error: %s", err)
 	}
 
 	*c = CommonNode{
@@ -182,6 +202,7 @@ func (c *CommonNode) UnmarshalJSON(data []byte) error {
 		CongestionControl:       flexibleString(raw.CongestionControl),
 		ZeroRTTHandshake:        flexibleBool(raw.ZeroRTTHandshake),
 		PaddingScheme:           flexibleStringSlice(raw.PaddingScheme),
+		WarpSettings:            warpSettings,
 		UpMbps:                  flexibleInt(raw.UpMbps),
 		DownMbps:                flexibleInt(raw.DownMbps),
 		Obfs:                    flexibleString(raw.Obfs),
@@ -246,6 +267,77 @@ func (b *BaseConfig) UnmarshalJSON(data []byte) error {
 		NodeReportMinTraffic:   flexibleInt(raw.NodeReportMinTraffic),
 	}
 	return nil
+}
+
+func (w *WarpSettings) UnmarshalJSON(data []byte) error {
+	if jsonRawIsEmpty(data) {
+		*w = WarpSettings{}
+		return nil
+	}
+
+	var raw struct {
+		Enable         json.RawMessage `json:"enable"`
+		Mode           json.RawMessage `json:"mode"`
+		FailPolicy     json.RawMessage `json:"fail_policy"`
+		MTU            json.RawMessage `json:"mtu"`
+		DomainStrategy json.RawMessage `json:"domain_strategy"`
+		PrivateKey     json.RawMessage `json:"private_key"`
+		PeerPublicKey  json.RawMessage `json:"peer_public_key"`
+		Endpoint       json.RawMessage `json:"endpoint"`
+		Addresses      json.RawMessage `json:"addresses"`
+		Reserved       json.RawMessage `json:"reserved"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(flexibleString(raw.Mode)))
+	if mode != "manual" {
+		mode = "auto"
+	}
+	failPolicy := strings.ToLower(strings.TrimSpace(flexibleString(raw.FailPolicy)))
+	if failPolicy != "block" {
+		failPolicy = "direct"
+	}
+	mtu := flexibleInt(raw.MTU)
+	if mtu <= 0 {
+		mtu = 1280
+	}
+	domainStrategy := strings.TrimSpace(flexibleString(raw.DomainStrategy))
+	if !isWarpDomainStrategy(domainStrategy) {
+		domainStrategy = "ForceIPv4v6"
+	}
+	endpoint := strings.TrimSpace(flexibleString(raw.Endpoint))
+	if endpoint == "" {
+		endpoint = "engage.cloudflareclient.com:2408"
+	}
+	addresses := flexibleCSVStringSlice(raw.Addresses)
+	if len(addresses) == 0 {
+		addresses = []string{"172.16.0.2/32", "2606:4700:110:8765::2/128"}
+	}
+
+	*w = WarpSettings{
+		Enable:         flexibleBool(raw.Enable),
+		Mode:           mode,
+		FailPolicy:     failPolicy,
+		MTU:            mtu,
+		DomainStrategy: domainStrategy,
+		PrivateKey:     strings.TrimSpace(flexibleString(raw.PrivateKey)),
+		PeerPublicKey:  strings.TrimSpace(flexibleString(raw.PeerPublicKey)),
+		Endpoint:       endpoint,
+		Addresses:      addresses,
+		Reserved:       flexibleByteSlice(raw.Reserved),
+	}
+	return nil
+}
+
+func isWarpDomainStrategy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "forceip", "forceipv4", "forceipv6", "forceipv4v6", "forceipv6v4":
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *TlsSettings) UnmarshalJSON(data []byte) error {
@@ -406,6 +498,40 @@ func flexibleStringSlice(raw []byte) []string {
 		return nil
 	}
 	return []string{value}
+}
+
+func flexibleCSVStringSlice(raw []byte) []string {
+	items := flexibleStringSlice(raw)
+	if len(items) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		for _, part := range strings.FieldsFunc(item, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r'
+		}) {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				values = append(values, part)
+			}
+		}
+	}
+	return values
+}
+
+func flexibleByteSlice(raw []byte) []byte {
+	items := flexibleCSVStringSlice(raw)
+	if len(items) == 0 {
+		return nil
+	}
+	values := make([]byte, 0, len(items))
+	for _, item := range items {
+		value := parseIntString(item)
+		if value >= 0 && value <= 255 {
+			values = append(values, byte(value))
+		}
+	}
+	return values
 }
 
 func stringToStringSlice(value string) []string {

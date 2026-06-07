@@ -109,6 +109,53 @@ func logRemovedCustomOutboundAllowInsecure(info *panel.NodeInfo, route panel.Rou
 	}).Warn("removed deprecated allowInsecure from custom route outbound TLS settings")
 }
 
+func appendCatchAllOutboundRule(routerConfig *coreConf.RouterConfig, inboundTag, outboundTag string) {
+	rule := map[string]interface{}{
+		"inboundTag":  inboundTag,
+		"network":     "tcp,udp",
+		"outboundTag": outboundTag,
+	}
+	rawRule, err := json.Marshal(rule)
+	if err != nil {
+		return
+	}
+	routerConfig.RuleList = append(routerConfig.RuleList, rawRule)
+}
+
+func appendDefaultDNSRule(routerConfig *coreConf.RouterConfig, inboundTags []string) {
+	rule := map[string]interface{}{
+		"port":        "53",
+		"network":     "udp",
+		"outboundTag": "dns_out",
+	}
+	if len(inboundTags) > 0 {
+		rule["inboundTag"] = inboundTags
+	}
+	rawRule, err := json.Marshal(rule)
+	if err != nil {
+		return
+	}
+	routerConfig.RuleList = append(routerConfig.RuleList, rawRule)
+}
+
+func nonWarpInboundTags(infos []*panel.NodeInfo) ([]string, bool) {
+	nonWarpTags := make([]string, 0, len(infos))
+	hasWarp := false
+	for _, info := range infos {
+		if info == nil || info.Common == nil {
+			continue
+		}
+		if warpEnabled(info) {
+			hasWarp = true
+			continue
+		}
+		if strings.TrimSpace(info.Tag) != "" {
+			nonWarpTags = append(nonWarpTags, info.Tag)
+		}
+	}
+	return nonWarpTags, hasWarp
+}
+
 func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHandlerConfig, *router.Config, error) {
 	//dns
 	queryStrategy := "UseIPv4v6"
@@ -135,20 +182,22 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 
 	//route
 	domainStrategy := "AsIs"
-	dnsRule, _ := json.Marshal(map[string]interface{}{
-		"port":        "53",
-		"network":     "udp",
-		"outboundTag": "dns_out",
-	})
 	coreRouterConfig := &coreConf.RouterConfig{
-		RuleList:       []json.RawMessage{dnsRule},
+		RuleList:       []json.RawMessage{},
 		DomainStrategy: &domainStrategy,
+	}
+	nonWarpTags, hasWarp := nonWarpInboundTags(infos)
+	if !hasWarp {
+		appendDefaultDNSRule(coreRouterConfig, nil)
+	} else if len(nonWarpTags) > 0 {
+		appendDefaultDNSRule(coreRouterConfig, nonWarpTags)
 	}
 
 	for _, info := range infos {
-		if len(info.Common.Routes) == 0 {
+		if info == nil || info.Common == nil {
 			continue
 		}
+		useWarp := warpEnabled(info)
 		for _, route := range info.Common.Routes {
 			switch route.Action {
 			case "dns":
@@ -268,6 +317,13 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 				}
 				coreOutboundConfig = append(coreOutboundConfig, custom_outbound)
 			case "default_out":
+				if useWarp {
+					log.WithFields(log.Fields{
+						"inbound_tag": info.Tag,
+						"route_id":    route.Id,
+					}).Warn("ignored custom default_out route because WARP outbound is enabled for this node")
+					continue
+				}
 				if route.ActionValue == nil {
 					continue
 				}
@@ -299,6 +355,27 @@ func GetCustomConfig(infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHand
 			default:
 				continue
 			}
+		}
+		if useWarp {
+			warpOutbound, warpTag, err := buildWarpOutbound(info)
+			if err != nil {
+				fields := log.Fields{
+					"inbound_tag": info.Tag,
+					"fail_policy": warpFailPolicy(info),
+					"error":       err,
+				}
+				if warpFailPolicy(info) == "block" {
+					appendCatchAllOutboundRule(coreRouterConfig, info.Tag, "block")
+					log.WithFields(fields).Warn("WARP outbound failed; node traffic will be blocked by fail_policy")
+				} else {
+					log.WithFields(fields).Warn("WARP outbound failed; node traffic will use direct fallback")
+				}
+				continue
+			}
+			if warpOutbound != nil && !hasOutboundWithTag(coreOutboundConfig, warpTag) {
+				coreOutboundConfig = append(coreOutboundConfig, warpOutbound)
+			}
+			appendCatchAllOutboundRule(coreRouterConfig, info.Tag, warpTag)
 		}
 	}
 	DnsConfig, err := coreDnsConfig.Build()

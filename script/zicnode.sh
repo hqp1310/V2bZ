@@ -307,6 +307,218 @@ show_log() {
     fi
 }
 
+json_value_from_file() {
+    local file="$1"
+    local key="$2"
+    if command -v jq >/dev/null 2>&1; then
+        jq -r "$key // empty" "$file" 2>/dev/null
+    else
+        local simple_key
+        simple_key=$(echo "$key" | sed -E 's/^\.Nodes\[0\]\.//;s/^\.//')
+        grep -m1 "\"${simple_key}\"" "$file" 2>/dev/null | sed -E 's/.*"'"${simple_key}"'"[[:space:]]*:[[:space:]]*"?([^",}]*)"?.*/\1/'
+    fi
+}
+
+json_value_from_text() {
+    local json="$1"
+    local key="$2"
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -r "$key // empty" 2>/dev/null
+    else
+        local simple_key
+        simple_key=$(echo "$key" | sed -E 's/^\.warp_settings\.//;s/^\.//')
+        local compact
+        compact=$(printf '%s' "$json" | tr -d '\n')
+        if echo "$compact" | grep -q "\"${simple_key}\""; then
+            echo "$compact" | sed -E 's/.*"'"${simple_key}"'"[[:space:]]*:[[:space:]]*"?([^",}]*)"?.*/\1/'
+        fi
+    fi
+}
+
+json_bool_from_text() {
+    local json="$1"
+    local key="$2"
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$json" | jq -r "($key // false) as \$v | if (\$v == true or \$v == 1 or \$v == \"1\" or \$v == \"true\") then \"true\" else \"false\" end" 2>/dev/null
+    else
+        local compact
+        compact=$(printf '%s' "$json" | tr -d '\n ')
+        if echo "$compact" | grep -Eq '"warp_settings":\{[^}]*"enable":(true|1|"1"|"true")'; then
+            echo "true"
+        else
+            echo "false"
+        fi
+    fi
+}
+
+print_warp_sidecar_status() {
+    local node_id="$1"
+    local sidecar_files=(/etc/zicnode/warp/*-zicnode-${node_id}.json)
+    if [[ -e "${sidecar_files[0]}" ]]; then
+        local sidecar="${sidecar_files[0]}"
+        echo -e "Sidecar: ${green}Có${plain}"
+        echo "Sidecar path: ${sidecar}"
+        if command -v stat >/dev/null 2>&1; then
+            echo "Sidecar updated: $(stat -c '%y' "$sidecar" 2>/dev/null | cut -d '.' -f1)"
+        fi
+        local endpoint addresses
+        endpoint=$(json_value_from_file "$sidecar" '.endpoint')
+        if command -v jq >/dev/null 2>&1; then
+            addresses=$(jq -r '.addresses // [] | join(",")' "$sidecar" 2>/dev/null)
+        else
+            addresses=$(grep -m1 '"addresses"' "$sidecar" 2>/dev/null | sed -E 's/.*\[([^]]*)\].*/\1/' | tr -d '" ')
+        fi
+        [[ -n "$endpoint" ]] && echo "Sidecar endpoint: ${endpoint}"
+        [[ -n "$addresses" ]] && echo "Sidecar addresses: ${addresses}"
+    else
+        echo -e "Sidecar: ${yellow}Chưa có${plain}"
+    fi
+}
+
+print_warp_logs() {
+    echo ""
+    echo "Log WARP gần nhất:"
+    if [[ x"${release}" == x"alpine" ]]; then
+        echo -e "${yellow}Alpine chưa hỗ trợ journalctl trong script này, vui lòng xem log service thủ công.${plain}"
+        return
+    fi
+    if ! command -v journalctl >/dev/null 2>&1; then
+        echo -e "${yellow}Không tìm thấy journalctl.${plain}"
+        return
+    fi
+    local logs
+    logs=$(journalctl -u zicnode.service -n 200 --no-pager 2>/dev/null | grep -iE 'warp|wireguard' | tail -n 30)
+    if [[ -n "$logs" ]]; then
+        echo "$logs"
+    else
+        echo -e "${yellow}Không thấy log WARP/WireGuard trong 200 dòng gần nhất.${plain}"
+    fi
+}
+
+check_cloudflare_warp_api() {
+    if ! command -v curl >/dev/null 2>&1; then
+        echo -e "Cloudflare API: ${yellow}Bỏ qua vì chưa cài curl${plain}"
+        return
+    fi
+    local http_code
+    http_code=$(curl -sS --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" https://api.cloudflareclient.com/ 2>/dev/null)
+    if [[ "$http_code" != "000" && -n "$http_code" ]]; then
+        echo -e "Cloudflare API: ${green}Kết nối được${plain} (HTTP ${http_code})"
+    else
+        echo -e "Cloudflare API: ${red}Không kết nối được${plain}"
+    fi
+}
+
+print_panel_warp_status() {
+    local api_host="$1"
+    local node_id="$2"
+    local api_key="$3"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        echo -e "Panel WARP: ${yellow}Không kiểm tra được vì chưa cài curl${plain}"
+        return
+    fi
+    local url body enabled mode fail_policy mtu endpoint
+    url="${api_host%/}/api/v3/server/config?node_type=zicnode&node_id=${node_id}&token=${api_key}"
+    body=$(curl -fsS --connect-timeout 8 --max-time 15 "$url" 2>/dev/null)
+    if [[ -z "$body" ]]; then
+        echo -e "Panel WARP: ${yellow}Không lấy được config từ panel${plain}"
+        return
+    fi
+    enabled=$(json_bool_from_text "$body" '.warp_settings.enable')
+    if [[ "$enabled" == "true" ]]; then
+        echo -e "Panel WARP: ${green}Bật${plain}"
+        mode=$(json_value_from_text "$body" '.warp_settings.mode')
+        fail_policy=$(json_value_from_text "$body" '.warp_settings.fail_policy')
+        mtu=$(json_value_from_text "$body" '.warp_settings.mtu')
+        endpoint=$(json_value_from_text "$body" '.warp_settings.endpoint')
+        [[ -n "$mode" ]] && echo "Mode: ${mode}"
+        [[ -n "$fail_policy" ]] && echo "Fail Policy: ${fail_policy}"
+        [[ -n "$mtu" ]] && echo "MTU: ${mtu}"
+        [[ -n "$endpoint" ]] && echo "Endpoint: ${endpoint}"
+    else
+        echo -e "Panel WARP: ${yellow}Tắt hoặc chưa cấu hình${plain}"
+        echo "Ghi chú: WARP được bật/tắt trong ZicBoard, không chỉnh tại VPS."
+    fi
+}
+
+warp_status_for_node() {
+    local api_host="$1"
+    local node_id="$2"
+    local api_key="$3"
+
+    echo "------------------------------------------"
+    echo "Node ID: ${node_id}"
+    echo "Panel: ${api_host}"
+    print_panel_warp_status "$api_host" "$node_id" "$api_key"
+    print_warp_sidecar_status "$node_id"
+}
+
+warp_status() {
+    check_status
+    case $? in
+        0)
+            echo -e "Trạng thái zicnode: ${green}Đang chạy${plain}"
+            ;;
+        1)
+            echo -e "Trạng thái zicnode: ${yellow}Không chạy${plain}"
+            ;;
+        2)
+            echo -e "Trạng thái zicnode: ${red}Chưa cài đặt${plain}"
+            if [[ $# == 0 ]]; then
+                before_show_menu
+            fi
+            return
+            ;;
+    esac
+
+    local config_file="/etc/zicnode/config.json"
+    if [[ ! -f "$config_file" ]]; then
+        echo -e "${red}Không tìm thấy ${config_file}${plain}"
+        if [[ $# == 0 ]]; then
+            before_show_menu
+        fi
+        return
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        local node_count i api_host node_id api_key
+        node_count=$(jq '.Nodes | length' "$config_file" 2>/dev/null)
+        [[ -z "$node_count" || "$node_count" == "null" ]] && node_count=0
+        if [[ "$node_count" -eq 0 ]]; then
+            echo -e "${red}Không tìm thấy Nodes[] trong ${config_file}${plain}"
+        fi
+        for ((i=0; i<node_count; i++)); do
+            api_host=$(jq -r ".Nodes[$i].ApiHost // empty" "$config_file" 2>/dev/null)
+            node_id=$(jq -r ".Nodes[$i].NodeID // empty" "$config_file" 2>/dev/null)
+            api_key=$(jq -r ".Nodes[$i].ApiKey // empty" "$config_file" 2>/dev/null)
+            if [[ -n "$api_host" && -n "$node_id" && -n "$api_key" ]]; then
+                warp_status_for_node "$api_host" "$node_id" "$api_key"
+            else
+                echo -e "${yellow}Bỏ qua node index ${i} vì thiếu ApiHost/NodeID/ApiKey.${plain}"
+            fi
+        done
+    else
+        local api_host node_id api_key
+        api_host=$(json_value_from_file "$config_file" '.Nodes[0].ApiHost')
+        node_id=$(json_value_from_file "$config_file" '.Nodes[0].NodeID')
+        api_key=$(json_value_from_file "$config_file" '.Nodes[0].ApiKey')
+        if [[ -n "$api_host" && -n "$node_id" && -n "$api_key" ]]; then
+            warp_status_for_node "$api_host" "$node_id" "$api_key"
+        else
+            echo -e "${red}Không đọc được cấu hình node đầu tiên. Cài jq để kiểm tra JSON chính xác hơn.${plain}"
+        fi
+    fi
+
+    echo "------------------------------------------"
+    check_cloudflare_warp_api
+    print_warp_logs
+
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
+}
+
 update_shell() {
     wget -O /usr/bin/zicnode -N --no-check-certificate https://raw.githubusercontent.com/${repo}/main/script/zicnode.sh
     if [[ $? != 0 ]]; then
@@ -508,6 +720,8 @@ show_usage() {
     echo "zicnode install      - Cài đặt zicnode"
     echo "zicnode uninstall    - Gỡ cài đặt zicnode"
     echo "zicnode version      - Xem phiên bản zicnode"
+    echo "zicnode warp         - Kiểm tra trạng thái WARP"
+    echo "zicnode warp_status  - Kiểm tra trạng thái WARP"
     echo "------------------------------------------"
 }
 
@@ -534,10 +748,11 @@ show_menu() {
   ${green}12.${plain} Nâng cấp script bảo trì zicnode
   ${green}13.${plain} Tạo tệp cấu hình zicnode
   ${green}14.${plain} Mở tất cả các cổng mạng của VPS
-  ${green}15.${plain} Thoát script
+  ${green}15.${plain} Kiểm tra trạng thái WARP
+  ${green}16.${plain} Thoát script
  "
     show_status
-    echo && read -rp "Vui lòng chọn [0-15]: " num
+    echo && read -rp "Vui lòng chọn [0-16]: " num
 
     case "${num}" in
         0) config ;;
@@ -555,8 +770,9 @@ show_menu() {
         12) update_shell ;;
         13) generate_config_file ;;
         14) open_ports ;;
-        15) exit ;;
-        *) echo -e "${red}Vui lòng nhập số chính xác [0-15]${plain}" ;;
+        15) check_install && warp_status ;;
+        16) exit ;;
+        *) echo -e "${red}Vui lòng nhập số chính xác [0-16]${plain}" ;;
     esac
 }
 
@@ -576,6 +792,8 @@ if [[ $# > 0 ]]; then
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
         "version") check_install 0 && show_zicnode_version 0 ;;
+        "warp") check_install 0 && warp_status 0 ;;
+        "warp_status") check_install 0 && warp_status 0 ;;
         "update_shell") update_shell ;;
         *) show_usage
     esac

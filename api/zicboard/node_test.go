@@ -156,6 +156,65 @@ func TestTlsSettingsFlexibleDecodeVariants(t *testing.T) {
 	}
 }
 
+func TestWarpSettingsFlexibleDecode(t *testing.T) {
+	data := []byte(`{
+		"enable": "1",
+		"mode": "manual",
+		"fail_policy": "block",
+		"mtu": "1280",
+		"domain_strategy": "ForceIPv4v6",
+		"private_key": true,
+		"peer_public_key": 123,
+		"endpoint": null,
+		"addresses": "172.16.0.2/32, 2606:4700:110:8765::2/128",
+		"reserved": "1,2,3"
+	}`)
+
+	var settings WarpSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("decode WarpSettings: %v", err)
+	}
+
+	if !settings.Enable || settings.Mode != "manual" || settings.FailPolicy != "block" {
+		t.Fatalf("unexpected flags: %#v", settings)
+	}
+	if settings.MTU != 1280 || settings.DomainStrategy != "ForceIPv4v6" || settings.Endpoint != "engage.cloudflareclient.com:2408" {
+		t.Fatalf("unexpected defaults: %#v", settings)
+	}
+	if settings.PrivateKey != "true" || settings.PeerPublicKey != "123" {
+		t.Fatalf("string fields were not normalized: %#v", settings)
+	}
+	if !reflect.DeepEqual(settings.Addresses, []string{"172.16.0.2/32", "2606:4700:110:8765::2/128"}) {
+		t.Fatalf("unexpected addresses: %#v", settings.Addresses)
+	}
+	if !reflect.DeepEqual(settings.Reserved, []byte{1, 2, 3}) {
+		t.Fatalf("unexpected reserved: %#v", settings.Reserved)
+	}
+}
+
+func TestCommonNodeFlexibleDecodeWarpSettings(t *testing.T) {
+	data := []byte(`{
+		"warp_settings": {
+			"enable": 1,
+			"mode": "auto",
+			"fail_policy": "direct",
+			"addresses": ["172.16.0.2/32", "2606:4700:110:8765::2/128"],
+			"reserved": [4, 5, 6]
+		}
+	}`)
+
+	var node CommonNode
+	if err := json.Unmarshal(data, &node); err != nil {
+		t.Fatalf("decode CommonNode: %v", err)
+	}
+	if !node.WarpSettings.Enable || node.WarpSettings.Mode != "auto" || node.WarpSettings.FailPolicy != "direct" {
+		t.Fatalf("unexpected warp settings: %#v", node.WarpSettings)
+	}
+	if !reflect.DeepEqual(node.WarpSettings.Reserved, []byte{4, 5, 6}) {
+		t.Fatalf("unexpected reserved bytes: %#v", node.WarpSettings.Reserved)
+	}
+}
+
 func TestTlsSettingsFlexibleDecodeXverAndRejectUnknownSniValues(t *testing.T) {
 	tests := []struct {
 		name             string
