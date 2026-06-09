@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -158,7 +159,7 @@ func (c *Controller) requestAutoCert(cert *panel.CertInfo) (*certMetadata, error
 		"mode":   challengeMode,
 		"err":    issueErr,
 	}).Warn("ACME cert issue failed, falling back to self-signed cert")
-	return c.generateAndStoreSelfCert(cert)
+	return c.generateAndStoreSelfCert(cert, "fallback_self")
 }
 
 func (c *Controller) requestSelfCert(cert *panel.CertInfo) (*certMetadata, error) {
@@ -179,18 +180,18 @@ func (c *Controller) requestSelfCert(cert *panel.CertInfo) (*certMetadata, error
 		}
 		return meta, err
 	}
-	return c.generateAndStoreSelfCert(cert)
+	return c.generateAndStoreSelfCert(cert, "self")
 }
 
-func (c *Controller) generateAndStoreSelfCert(cert *panel.CertInfo) (*certMetadata, error) {
+func (c *Controller) generateAndStoreSelfCert(cert *panel.CertInfo, source string) (*certMetadata, error) {
 	if err := generateSelfSslCertificate(cert.CertDomain, cert.CertFile, cert.KeyFile); err != nil {
-		return basicCertMetadata(cert, "self"), fmt.Errorf("generate self cert error: %s", err)
+		return basicCertMetadata(cert, source), fmt.Errorf("generate self cert error: %s", err)
 	}
 	x509Cert, err := loadCertificate(cert)
 	if err != nil {
-		return basicCertMetadata(cert, "self"), err
+		return basicCertMetadata(cert, source), err
 	}
-	meta := metadataFromCertificate(cert, x509Cert, "self")
+	meta := metadataFromCertificate(cert, x509Cert, source)
 	_ = c.writeCertMetadata(meta)
 	return meta, nil
 }
@@ -268,7 +269,10 @@ func loadCertificate(cert *panel.CertInfo) (*x509.Certificate, error) {
 }
 
 func isSelfSignedCertificate(cert *x509.Certificate) bool {
-	return cert.CheckSignatureFrom(cert) == nil
+	if cert == nil || !bytes.Equal(cert.RawSubject, cert.RawIssuer) {
+		return false
+	}
+	return cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) == nil
 }
 
 func renewBefore(target string) time.Duration {

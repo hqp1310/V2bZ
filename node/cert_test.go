@@ -8,7 +8,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,37 @@ func TestMetadataFromCertificateIncludesPinHashes(t *testing.T) {
 	}
 }
 
+func TestSelfSignedCertificateDetectsLeafWithoutCA(t *testing.T) {
+	cert := testCertificate(t)
+	if cert.IsCA {
+		t.Fatal("test certificate should be a leaf certificate")
+	}
+	if !isSelfSignedCertificate(cert) {
+		t.Fatal("self-signed leaf certificate was not detected")
+	}
+}
+
+func TestCertificateReadyRejectsSelfSignedForManagedCert(t *testing.T) {
+	cert := testCertificate(t)
+	certInfo := writeTestCertificateFiles(t, cert)
+
+	ready, _, err := certificateReady(certInfo, time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready {
+		t.Fatal("self-signed certificate should not be ready for managed ACME cert")
+	}
+
+	ready, _, err = certificateReady(certInfo, time.Hour, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatal("self-signed certificate should be ready when self-signed certificates are allowed")
+	}
+}
+
 func testCertificate(t *testing.T) *x509.Certificate {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -80,6 +113,21 @@ func testCertificate(t *testing.T) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return cert
+}
+
+func writeTestCertificateFiles(t *testing.T, cert *x509.Certificate) *panel.CertInfo {
+	t.Helper()
+	dir := t.TempDir()
+	certPath := dir + "/cert.pem"
+	keyPath := dir + "/key.pem"
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("test-key-present"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &panel.CertInfo{CertDomain: "example.com", CertFile: certPath, KeyFile: keyPath}
 }
 
 func colonUpper(hexValue string) string {
