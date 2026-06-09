@@ -89,3 +89,33 @@ func colonUpper(hexValue string) string {
 	}
 	return strings.Join(parts, ":")
 }
+
+func TestAutoCertChallengeUsesDNSForDomainTarget(t *testing.T) {
+	cert := &panel.CertInfo{
+		CertDomain: "www.apple.com",
+		Provider:   "cloudflare",
+		DNSEnv: map[string]string{
+			"CF_DNS_API_TOKEN": "token",
+		},
+	}
+
+	mode, source := autoCertChallenge(cert)
+	if mode != "dns" || source != "acme_dns" {
+		t.Fatalf("autoCertChallenge got mode=%q source=%q, want dns/acme_dns", mode, source)
+	}
+}
+
+func TestAutoCertChallengeKeepsIPTargetOnHTTPPath(t *testing.T) {
+	cert := &panel.CertInfo{
+		CertDomain: "8.8.8.8",
+		Provider:   "cloudflare",
+		DNSEnv: map[string]string{
+			"CF_DNS_API_TOKEN": "token",
+		},
+	}
+
+	mode, source := autoCertChallenge(cert)
+	if mode != "http" || source != "acme_ip" {
+		t.Fatalf("autoCertChallenge got mode=%q source=%q, want http/acme_ip", mode, source)
+	}
+}

@@ -20,6 +20,8 @@ const (
 	Reality = 2
 )
 
+const defaultACMEEmail = "contact@zicnet.vn"
+
 type NodeInfo struct {
 	Id           int
 	Type         string
@@ -812,7 +814,7 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 	switch cm.Protocol {
 	case "vmess", "trojan", "hysteria2", "tuic", "anytls", "vless":
 		node.Type = cm.Protocol
-		node.Security = cm.Tls
+		node.Security = cm.EffectiveSecurity()
 	case "shadowsocks":
 		node.Type = cm.Protocol
 		node.Security = 0
@@ -821,10 +823,7 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 	}
 	node.Tag = fmt.Sprintf("[%s]-%s:%d", c.APIHost, node.Type, node.Id)
 	certMode := strings.TrimSpace(cm.TlsSettings.CertMode)
-	certDomain := strings.TrimSpace(cm.TlsSettings.PrimaryServerName())
-	if certDomain == "" {
-		certDomain = strings.TrimSpace(cm.Host)
-	}
+	certDomain := cm.CertTarget()
 	cf := cm.TlsSettings.CertFile
 	kf := cm.TlsSettings.KeyFile
 	if cf == "" {
@@ -837,7 +836,7 @@ func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 		CertMode:         certMode,
 		CertFile:         cf,
 		KeyFile:          kf,
-		Email:            "node@zicboard.local",
+		Email:            defaultACMEEmail,
 		CertDomain:       certDomain,
 		DNSEnv:           make(map[string]string),
 		Provider:         cm.TlsSettings.Provider,
@@ -899,4 +898,46 @@ func (t TlsSettings) PrimaryServerName() string {
 		return ""
 	}
 	return serverNames[0]
+}
+
+func (c CommonNode) CertTarget() string {
+	if target := strings.TrimSpace(c.TlsSettings.PrimaryServerName()); target != "" {
+		return target
+	}
+	return strings.TrimSpace(c.Host)
+}
+
+func (c CommonNode) EffectiveSecurity() int {
+	protocol := strings.ToLower(strings.TrimSpace(c.Protocol))
+	if protocol == "shadowsocks" {
+		return None
+	}
+	if c.Tls == Reality {
+		if zicnodeProtocolAllowsReality(protocol) {
+			return Reality
+		}
+		return Tls
+	}
+	if zicnodeProtocolUsesNormalTLS(protocol) {
+		return Tls
+	}
+	return c.Tls
+}
+
+func zicnodeProtocolUsesNormalTLS(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "trojan", "hysteria", "hysteria2", "tuic", "anytls":
+		return true
+	default:
+		return false
+	}
+}
+
+func zicnodeProtocolAllowsReality(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "vless", "anytls":
+		return true
+	default:
+		return false
+	}
 }

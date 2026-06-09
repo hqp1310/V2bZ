@@ -274,3 +274,69 @@ func TestFlexibleDecodeEmptyValues(t *testing.T) {
 		t.Fatalf("unexpected empty route match: %#v", node.Routes)
 	}
 }
+
+func TestCommonNodeCertTargetPrefersSNIOverHost(t *testing.T) {
+	node := CommonNode{
+		Host: "my-node.example.com",
+		TlsSettings: TlsSettings{
+			ServerName: "www.apple.com",
+		},
+	}
+	if got := node.CertTarget(); got != "www.apple.com" {
+		t.Fatalf("CertTarget got %q, want server_name", got)
+	}
+
+	node = CommonNode{
+		Host: "fallback.example.com",
+	}
+	if got := node.CertTarget(); got != "fallback.example.com" {
+		t.Fatalf("CertTarget fallback got %q, want host", got)
+	}
+
+	node = CommonNode{
+		Host: "my-node.example.com",
+		TlsSettings: TlsSettings{
+			ServerName:  "b.example.com",
+			ServerNames: []string{"a.example.com"},
+		},
+	}
+	if got := node.CertTarget(); got != "a.example.com" {
+		t.Fatalf("CertTarget server_names got %q, want first server_names entry", got)
+	}
+}
+
+func TestDefaultACMEEmail(t *testing.T) {
+	if defaultACMEEmail != "contact@zicnet.vn" {
+		t.Fatalf("defaultACMEEmail got %q, want contact@zicnet.vn", defaultACMEEmail)
+	}
+}
+
+func TestCommonNodeEffectiveSecurityUsesImplicitTLSProtocols(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		tls      int
+		want     int
+	}{
+		{name: "trojan old zero", protocol: "trojan", tls: None, want: Tls},
+		{name: "hysteria2 old zero", protocol: "hysteria2", tls: None, want: Tls},
+		{name: "tuic old zero", protocol: "tuic", tls: None, want: Tls},
+		{name: "anytls old zero", protocol: "anytls", tls: None, want: Tls},
+		{name: "anytls reality", protocol: "anytls", tls: Reality, want: Reality},
+		{name: "trojan bad reality", protocol: "trojan", tls: Reality, want: Tls},
+		{name: "vmess bad reality", protocol: "vmess", tls: Reality, want: Tls},
+		{name: "vless none", protocol: "vless", tls: None, want: None},
+		{name: "vless tls", protocol: "vless", tls: Tls, want: Tls},
+		{name: "vless reality", protocol: "vless", tls: Reality, want: Reality},
+		{name: "shadowsocks ignores tls", protocol: "shadowsocks", tls: Tls, want: None},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := CommonNode{Protocol: tt.protocol, Tls: tt.tls}
+			if got := node.EffectiveSecurity(); got != tt.want {
+				t.Fatalf("EffectiveSecurity got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

@@ -183,7 +183,7 @@ func (c *Client) ReportNodeOnlineUsers(ctx context.Context, data *map[int][]stri
 
 func (c *Client) ReportCertStatus(ctx context.Context, data *CertReport) error {
 	const path = "/api/v3/server/UniProxy/cert/report"
-	_, err := c.client.R().
+	r, err := c.client.R().
 		SetContext(ctx).
 		SetBody(data).
 		ForceContentType("application/json").
@@ -191,6 +191,19 @@ func (c *Client) ReportCertStatus(ctx context.Context, data *CertReport) error {
 
 	if err != nil {
 		return err
+	}
+	if r == nil {
+		return fmt.Errorf("cert report received nil response")
+	}
+	if r.StatusCode() >= 400 {
+		body := strings.TrimSpace(string(r.Body()))
+		if len(body) > 512 {
+			body = body[:512] + "..."
+		}
+		if body != "" {
+			return fmt.Errorf("cert report failed: status=%d body=%s", r.StatusCode(), body)
+		}
+		return fmt.Errorf("cert report failed: status=%d", r.StatusCode())
 	}
 
 	return nil

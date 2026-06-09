@@ -67,6 +67,9 @@ func (c *Controller) requestCert() (*certMetadata, error) {
 	cert := c.info.Common.CertInfo
 	cert.CertMode = strings.ToLower(strings.TrimSpace(cert.CertMode))
 	cert.CertDomain = normalizeCertTarget(cert.CertDomain)
+	if strings.TrimSpace(cert.Email) == "" {
+		cert.Email = "contact@zicnet.vn"
+	}
 
 	switch cert.CertMode {
 	case "none", "":
