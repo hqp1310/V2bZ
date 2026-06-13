@@ -21,6 +21,8 @@ type Controller struct {
 	aliveMap                map[int]int
 	conf                    *conf.NodeConfig
 	info                    *panel.NodeInfo
+	nodeFingerprint         string
+	nodeAdded               bool
 	nodeInfoMonitorPeriodic *task.Task
 	userReportPeriodic      *task.Task
 	renewCertPeriodic       *task.Task
@@ -38,10 +40,15 @@ func NewController(api *panel.Client, conf *conf.NodeConfig, info *panel.NodeInf
 
 // Start implement the Start() function of the service interface
 func (c *Controller) Start(x *core.V2Core) error {
-	// Init Core
+	if err := c.Prepare(x); err != nil {
+		return err
+	}
+	return c.StartPrepared(x)
+}
+
+func (c *Controller) Prepare(x *core.V2Core) error {
 	c.server = x
 	var err error
-	// First fetch Node Info
 	node := c.info
 	if node == nil {
 		c.info, err = c.apiClient.GetNodeInfo(context.Background())
@@ -50,7 +57,6 @@ func (c *Controller) Start(x *core.V2Core) error {
 		}
 		node = c.info
 	}
-	// Update user
 	c.userList, err = c.apiClient.GetUserList(context.Background())
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
@@ -63,21 +69,39 @@ func (c *Controller) Start(x *core.V2Core) error {
 		return fmt.Errorf("failed to get user alive list: %s", err)
 	}
 	c.tag = node.Tag
-
-	// add limiter
-	l := limiter.AddLimiter(c.info.Type, c.tag, c.userList, c.aliveMap)
-	c.limiter = l
 	if node.Security == panel.Tls {
 		err = c.requestCertAndReport(false)
 		if err != nil {
 			return fmt.Errorf("request cert error: %s", err)
 		}
 	}
+	c.info = node
+	c.nodeFingerprint = node.CoreFingerprint()
+	return nil
+}
+
+func (c *Controller) StartPrepared(x *core.V2Core) error {
+	c.server = x
+	node := c.info
+	if node == nil {
+		return fmt.Errorf("node info is not prepared")
+	}
+	c.tag = node.Tag
+	if c.userList == nil {
+		c.userList = []panel.UserInfo{}
+	}
+	if c.aliveMap == nil {
+		c.aliveMap = make(map[int]int)
+	}
+
+	l := limiter.AddLimiter(c.info.Type, c.tag, c.userList, c.aliveMap)
+	c.limiter = l
 	// Add new tag
-	err = c.server.AddNode(c.tag, node)
+	err := c.server.AddNode(c.tag, node)
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
+	c.nodeAdded = true
 	added, err := c.server.AddUsers(&core.AddUsersParams{
 		Tag:      c.tag,
 		Users:    c.userList,
@@ -88,25 +112,36 @@ func (c *Controller) Start(x *core.V2Core) error {
 	}
 	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
+	if c.nodeFingerprint == "" {
+		c.nodeFingerprint = node.CoreFingerprint()
+	}
 	c.startTasks(node)
 	return nil
 }
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
-	limiter.DeleteLimiter(c.tag)
+	if c.tag != "" {
+		limiter.DeleteLimiter(c.tag)
+	}
 	if c.nodeInfoMonitorPeriodic != nil {
 		c.nodeInfoMonitorPeriodic.Close()
+		c.nodeInfoMonitorPeriodic = nil
 	}
 	if c.userReportPeriodic != nil {
 		c.userReportPeriodic.Close()
+		c.userReportPeriodic = nil
 	}
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()
+		c.renewCertPeriodic = nil
 	}
-	err := c.server.DelNode(c.tag)
-	if err != nil {
-		return fmt.Errorf("del node error: %s", err)
+	if c.nodeAdded && c.server != nil {
+		err := c.server.DelNode(c.tag)
+		if err != nil {
+			return fmt.Errorf("del node error: %s", err)
+		}
+		c.nodeAdded = false
 	}
 	return nil
 }

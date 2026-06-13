@@ -872,6 +872,35 @@ func intervalToTime(i interface{}) time.Duration {
 	return time.Duration(flexibleIntFromAny(i)) * time.Second
 }
 
+// CoreFingerprint returns a hash of the node fields that require a full core
+// rebuild when they change. Fields that do not affect the running core
+// (report/pull intervals and min-traffic thresholds carried in BaseConfig) are
+// intentionally excluded so routine panel updates do not disconnect users.
+func (n *NodeInfo) CoreFingerprint() string {
+	if n == nil {
+		return ""
+	}
+	fp := struct {
+		Type     string      `json:"type"`
+		Security int         `json:"security"`
+		Common   *CommonNode `json:"common"`
+	}{
+		Type:     n.Type,
+		Security: n.Security,
+	}
+	if n.Common != nil {
+		common := *n.Common
+		common.BaseConfig = nil
+		fp.Common = &common
+	}
+	data, err := json.Marshal(fp)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
+
 func (t TlsSettings) EffectiveServerNames() []string {
 	if len(t.ServerNames) > 0 {
 		return t.ServerNames

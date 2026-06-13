@@ -1,9 +1,11 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 
 	panel "github.com/ZicBoard/ZicNode/api/zicboard"
+	"github.com/ZicBoard/ZicNode/common/reload"
 	"github.com/ZicBoard/ZicNode/conf"
 	"github.com/ZicBoard/ZicNode/core/app/dispatcher"
 	_ "github.com/ZicBoard/ZicNode/core/distro/all"
@@ -27,7 +29,7 @@ type AddUsersParams struct {
 
 type V2Core struct {
 	Config     *conf.Conf
-	ReloadCh   chan struct{}
+	ReloadCh   chan reload.Event
 	access     sync.Mutex
 	Server     *core.Instance
 	users      *UserMap
@@ -52,33 +54,85 @@ func New(config *conf.Conf) *V2Core {
 }
 
 func (v *V2Core) Start(infos []*panel.NodeInfo) error {
-	v.access.Lock()
-	defer v.access.Unlock()
-	v.Server = getCore(v.Config, infos)
-	if err := v.Server.Start(); err != nil {
+	if err := v.Prepare(infos); err != nil {
 		return err
 	}
-	v.ihm = v.Server.GetFeature(inbound.ManagerType()).(inbound.Manager)
-	v.ohm = v.Server.GetFeature(outbound.ManagerType()).(outbound.Manager)
-	v.dispatcher = v.Server.GetFeature(routing.DispatcherType()).(*dispatcher.DefaultDispatcher)
+	return v.StartPrepared()
+}
+
+func (v *V2Core) Prepare(infos []*panel.NodeInfo) error {
+	v.access.Lock()
+	defer v.access.Unlock()
+	server, err := getCore(v.Config, infos)
+	if err != nil {
+		return err
+	}
+	v.Server = server
 	return nil
 }
 
-func (v *V2Core) Close() error {
+func (v *V2Core) StartPrepared() error {
 	v.access.Lock()
 	defer v.access.Unlock()
+	if v.Server == nil {
+		return fmt.Errorf("core has not been prepared")
+	}
+	if err := v.Server.Start(); err != nil {
+		return err
+	}
+	ihm, ok := v.Server.GetFeature(inbound.ManagerType()).(inbound.Manager)
+	if !ok {
+		return fmt.Errorf("core inbound manager is unavailable")
+	}
+	ohm, ok := v.Server.GetFeature(outbound.ManagerType()).(outbound.Manager)
+	if !ok {
+		return fmt.Errorf("core outbound manager is unavailable")
+	}
+	d, ok := v.Server.GetFeature(routing.DispatcherType()).(*dispatcher.DefaultDispatcher)
+	if !ok {
+		return fmt.Errorf("core dispatcher is unavailable")
+	}
+	v.ihm = ihm
+	v.ohm = ohm
+	v.dispatcher = d
+	return nil
+}
+
+func (v *V2Core) ActiveLinkCount() int {
+	v.access.Lock()
+	defer v.access.Unlock()
+	if v.dispatcher == nil {
+		return 0
+	}
+	return v.dispatcher.ActiveLinkCount()
+}
+
+func (v *V2Core) Close() error {
+	return v.CloseWithReason("", nil)
+}
+
+func (v *V2Core) CloseWithReason(reason string, fields log.Fields) error {
+	v.access.Lock()
+	defer v.access.Unlock()
+	if v.dispatcher != nil && reason != "" {
+		v.dispatcher.CloseAllManagedLinks(reason, fields)
+	}
 	v.Config = nil
 	v.ihm = nil
 	v.ohm = nil
 	v.dispatcher = nil
+	if v.Server == nil {
+		return nil
+	}
 	err := v.Server.Close()
 	if err != nil {
 		return err
 	}
+	v.Server = nil
 	return nil
 }
 
-func getCore(c *conf.Conf, infos []*panel.NodeInfo) *core.Instance {
+func getCore(c *conf.Conf, infos []*panel.NodeInfo) (*core.Instance, error) {
 	// Log Config
 	coreLogConfig := &coreConf.LogConfig{
 		LogLevel:  c.LogConfig.Level,
@@ -88,7 +142,7 @@ func getCore(c *conf.Conf, infos []*panel.NodeInfo) *core.Instance {
 	// Custom config
 	dnsConfig, outBoundConfig, routeConfig, err := GetCustomConfig(infos)
 	if err != nil {
-		log.WithField("err", err).Panic("failed to build custom config")
+		return nil, fmt.Errorf("failed to build custom config: %w", err)
 	}
 	// Inbound config
 	var inBoundConfig []*core.InboundHandlerConfig
@@ -123,8 +177,8 @@ func getCore(c *conf.Conf, infos []*panel.NodeInfo) *core.Instance {
 	}
 	server, err := core.New(config)
 	if err != nil {
-		log.WithField("err", err).Panic("failed to create instance")
+		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}
 	log.Info("Xray Core Version: ", core.Version())
-	return server
+	return server, nil
 }

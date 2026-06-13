@@ -326,6 +326,7 @@ EOF
 Description=zicnode Service
 After=network.target nss-lookup.target
 Wants=network.target
+StartLimitIntervalSec=0
 
 [Service]
 User=root
@@ -336,9 +337,10 @@ LimitRSS=infinity
 LimitCORE=infinity
 LimitNOFILE=999999
 WorkingDirectory=/usr/local/zicnode/
-ExecStart=/usr/local/zicnode/zicnode server
+ExecStart=/usr/local/zicnode/zicnode server --config /etc/zicnode/config.json
 Restart=always
-RestartSec=10
+RestartSec=3
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

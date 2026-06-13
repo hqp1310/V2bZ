@@ -1,18 +1,33 @@
 package conf
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+func fileHash(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
 
 func (p *Conf) Watch(filePath string, reload func()) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("new watcher error: %s", err)
 	}
+	// Track the current content hash so editor/atomic writes that do not change
+	// the actual config do not trigger a reload (which disconnects users).
+	lastHash, _ := fileHash(filePath)
 	go func() {
 		var pre time.Time
 		defer watcher.Close()
@@ -28,12 +43,22 @@ func (p *Conf) Watch(filePath string, reload func()) error {
 				pre = time.Now()
 				go func() {
 					time.Sleep(5 * time.Second)
+					newHash, err := fileHash(filePath)
+					if err != nil {
+						log.Printf("read config for change detection error: %s", err)
+						return
+					}
+					if newHash == lastHash {
+						log.Println("config file event ignored: content unchanged")
+						return
+					}
 					log.Println("config file changed, reloading...")
 					*p = *New()
-					err := p.LoadFromPath(filePath)
-					if err != nil {
+					if err := p.LoadFromPath(filePath); err != nil {
 						log.Printf("reload config error: %s", err)
+						return
 					}
+					lastHash = newHash
 					reload()
 					log.Println("reload config success")
 				}()

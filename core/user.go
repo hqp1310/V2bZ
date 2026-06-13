@@ -11,6 +11,7 @@ import (
 	"github.com/ZicBoard/ZicNode/common/counter"
 	"github.com/ZicBoard/ZicNode/common/format"
 	"github.com/ZicBoard/ZicNode/core/app/dispatcher"
+	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/infra/conf"
@@ -65,7 +66,11 @@ func (vc *V2Core) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo
 		}
 		if v, ok := vc.dispatcher.LinkManagers.Load(user); ok {
 			lm := v.(*dispatcher.LinkManager)
-			lm.CloseAll()
+			lm.CloseAll("user_removed_from_panel", log.Fields{
+				"tag":  tag,
+				"user": user,
+				"uid":  users[i].Id,
+			})
 			vc.dispatcher.LinkManagers.Delete(user)
 		}
 	}

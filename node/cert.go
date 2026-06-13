@@ -24,6 +24,7 @@ import (
 	"time"
 
 	panel "github.com/ZicBoard/ZicNode/api/zicboard"
+	"github.com/ZicBoard/ZicNode/common/reload"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -56,8 +57,27 @@ func (c *Controller) requestCertAndReport(reloadOnChange bool) error {
 	meta, err := c.requestCert()
 	c.reportCertStatus(meta, err)
 	if reloadOnChange && err == nil && certMetadataChanged(previous, meta) && c.server != nil && c.server.ReloadCh != nil {
+		fields := log.Fields{
+			"event":         "cert_auto_tls",
+			"reason":        "fallback_cert_changed",
+			"action":        "request_reload",
+			"reload_reason": reload.ReasonCertMetadataChange,
+			"tag":           c.tag,
+		}
+		details := map[string]string{}
+		if meta != nil {
+			fields["target"] = meta.Target
+			fields["source"] = meta.Source
+			fields["sha256_hex"] = shortHash(meta.SHA256Hex)
+			fields["public_key_sha256"] = shortHash(meta.PublicKeySHA256)
+			details["target"] = meta.Target
+			details["source"] = meta.Source
+			details["sha256_hex"] = shortHash(meta.SHA256Hex)
+			details["public_key_sha256"] = shortHash(meta.PublicKeySHA256)
+		}
+		log.WithFields(fields).Error("cert metadata changed, request reload")
 		select {
-		case c.server.ReloadCh <- struct{}{}:
+		case c.server.ReloadCh <- reload.Event{Reason: reload.ReasonCertMetadataChange, NodeTag: c.tag, Details: details}:
 		default:
 		}
 	}
@@ -154,11 +174,14 @@ func (c *Controller) requestAutoCert(cert *panel.CertInfo) (*certMetadata, error
 		return basicCertMetadata(cert, source), fmt.Errorf("create lego cert error: %s", issueErr)
 	}
 	log.WithFields(log.Fields{
+		"event":  "cert_auto_tls",
+		"reason": "acme_failed",
+		"action": "fallback_self_signed",
 		"tag":    c.tag,
 		"target": cert.CertDomain,
 		"mode":   challengeMode,
 		"err":    issueErr,
-	}).Warn("ACME cert issue failed, falling back to self-signed cert")
+	}).Error("ACME cert issue failed, falling back to self-signed cert")
 	return c.generateAndStoreSelfCert(cert, "fallback_self")
 }
 
@@ -430,6 +453,13 @@ func (c *Controller) readCertMetadata() (*certMetadata, error) {
 	return &meta, nil
 }
 
+func shortHash(value string) string {
+	const maxLen = 12
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen]
+}
 func certMetadataChanged(previous, next *certMetadata) bool {
 	if next == nil {
 		return false

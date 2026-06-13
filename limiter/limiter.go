@@ -11,6 +11,12 @@ import (
 	"github.com/ZicBoard/ZicNode/common/rate"
 )
 
+const (
+	RejectAllowed             = "allowed"
+	RejectUnknownUser         = "unknown_user"
+	RejectDeviceLimitExceeded = "device_limit_exceeded"
+)
+
 var limitLock sync.RWMutex
 var limiter map[string]*Limiter
 
@@ -36,6 +42,13 @@ type UserLimitInfo struct {
 	DynamicSpeedLimit int
 	ExpireTime        int64
 	OverLimit         bool
+}
+
+type RejectInfo struct {
+	Reason      string
+	UID         int
+	DeviceLimit int
+	AliveIP     int
 }
 
 func AddLimiter(nodetype string, tag string, users []panel.UserInfo, aliveList map[int]int) *Limiter {
@@ -140,7 +153,7 @@ func (l *Limiter) UpdateDynamicSpeedLimit(tag, uuid string, limit int, expire ti
 	return nil
 }
 
-func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (DynamicBucket *rate.DynamicBucket, Reject bool) {
+func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (DynamicBucket *rate.DynamicBucket, Reject bool, Info RejectInfo) {
 	// check if ipv4 mapped ipv6
 	ip = strings.TrimPrefix(ip, "::ffff:")
 
@@ -165,13 +178,19 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 			userLimit = determineSpeedLimit(u.SpeedLimit, u.DynamicSpeedLimit)
 		}
 	} else {
-		return nil, true
+		return nil, true, RejectInfo{Reason: RejectUnknownUser}
+	}
+	aliveIP := l.AliveList[uid]
+	allowedInfo := RejectInfo{
+		Reason:      RejectAllowed,
+		UID:         uid,
+		DeviceLimit: deviceLimit,
+		AliveIP:     aliveIP,
 	}
 	if noUDPsource || l.Nodetype == "hysteria2" || l.Nodetype == "tuic" {
 		// Store online user for device limit
 		newipMap := new(sync.Map)
 		newipMap.Store(ip, uid)
-		aliveIp := l.AliveList[uid]
 		// If any device is online
 		if v, loaded := l.UserOnlineIP.LoadOrStore(taguuid, newipMap); loaded {
 			oldipMap := v.(*sync.Map)
@@ -182,9 +201,9 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 						l.OldUserOnline.Delete(ip)
 					}
 				} else if deviceLimit > 0 {
-					if deviceLimit <= aliveIp {
+					if deviceLimit <= aliveIP {
 						oldipMap.Delete(ip)
-						return nil, true
+						return nil, true, RejectInfo{Reason: RejectDeviceLimitExceeded, UID: uid, DeviceLimit: deviceLimit, AliveIP: aliveIP}
 					}
 				}
 			}
@@ -194,9 +213,9 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 			}
 		} else {
 			if deviceLimit > 0 {
-				if deviceLimit <= aliveIp {
+				if deviceLimit <= aliveIP {
 					l.UserOnlineIP.Delete(taguuid)
-					return nil, true
+					return nil, true, RejectInfo{Reason: RejectDeviceLimitExceeded, UID: uid, DeviceLimit: deviceLimit, AliveIP: aliveIP}
 				}
 			}
 		}
@@ -205,14 +224,14 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 	limit := int64(determineSpeedLimit(nodeLimit, userLimit)) * 1000000 / 8 // If you need the Speed limit
 	if limit > 0 {
 		if v, ok := l.SpeedLimiter.Load(taguuid); ok {
-			return v.(*rate.DynamicBucket), false
+			return v.(*rate.DynamicBucket), false, allowedInfo
 		} else {
 			d := rate.NewDynamicBucket(limit)
 			l.SpeedLimiter.Store(taguuid, d)
-			return d, false
+			return d, false, allowedInfo
 		}
 	} else {
-		return nil, false
+		return nil, false, allowedInfo
 	}
 }
 

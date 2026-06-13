@@ -45,17 +45,61 @@ func (n *Node) Start(nodes []conf.NodeConfig, core *core.V2Core) error {
 				err)
 		}
 	}
+	n.refreshNodeInfos()
+	return nil
+}
+
+func (n *Node) Prepare(core *core.V2Core) error {
+	for i, c := range n.controllers {
+		if err := c.Prepare(core); err != nil {
+			return fmt.Errorf("prepare node controller [%s-%d] error: %s",
+				c.conf.APIHost,
+				c.conf.NodeID,
+				err)
+		}
+		n.NodeInfos[i] = cloneNodeInfo(c.info)
+	}
+	return nil
+}
+
+func (n *Node) StartPrepared(core *core.V2Core) error {
+	for i, c := range n.controllers {
+		err := c.StartPrepared(core)
+		if err != nil {
+			return fmt.Errorf("start prepared node controller [%s-%d] error: %s",
+				c.conf.APIHost,
+				c.conf.NodeID,
+				err)
+		}
+		n.NodeInfos[i] = cloneNodeInfo(c.info)
+	}
 	return nil
 }
 
 func (n *Node) Close() error {
 	var err error
 	for _, c := range n.controllers {
-		if err = c.Close(); err != nil {
-			log.Errorf("close controller failed: %v", err)
-			return err
+		if c == nil {
+			continue
+		}
+		if closeErr := c.Close(); closeErr != nil {
+			log.Errorf("close controller failed: %v", closeErr)
+			if err == nil {
+				err = closeErr
+			}
 		}
 	}
 	n.controllers = nil
-	return nil
+	return err
+}
+
+func (n *Node) refreshNodeInfos() {
+	if n == nil {
+		return
+	}
+	for i, c := range n.controllers {
+		if c != nil {
+			n.NodeInfos[i] = cloneNodeInfo(c.info)
+		}
+	}
 }

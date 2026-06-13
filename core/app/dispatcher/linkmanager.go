@@ -1,8 +1,9 @@
 package dispatcher
 
 import (
-	sync "sync"
+	"sync"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
 )
@@ -38,11 +39,39 @@ func (m *LinkManager) RemoveWriter(writer *ManagedWriter) {
 	delete(m.links, writer)
 }
 
-func (m *LinkManager) CloseAll() {
+func (m *LinkManager) Count() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.links)
+}
+
+func (m *LinkManager) CloseAll(reason string, fields log.Fields) int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for w, r := range m.links {
+	links := m.links
+	m.links = make(map[*ManagedWriter]buf.Reader)
+	m.mu.Unlock()
+
+	closed := len(links)
+	for w, r := range links {
 		common.Close(w)
 		common.Interrupt(r)
 	}
+
+	if closed > 0 {
+		logFields := cloneLogFields(fields)
+		logFields["event"] = "zicnode_disconnect"
+		logFields["reason"] = reason
+		logFields["action"] = "close_managed_links"
+		logFields["closed_links"] = closed
+		log.WithFields(logFields).Error("managed links closed")
+	}
+	return closed
+}
+
+func cloneLogFields(fields log.Fields) log.Fields {
+	cloned := log.Fields{}
+	for key, value := range fields {
+		cloned[key] = value
+	}
+	return cloned
 }

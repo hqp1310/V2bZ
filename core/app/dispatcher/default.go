@@ -12,6 +12,8 @@ import (
 	"github.com/ZicBoard/ZicNode/common/rate"
 	"github.com/ZicBoard/ZicNode/limiter"
 
+	logrus "github.com/sirupsen/logrus"
+
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
@@ -146,7 +148,36 @@ func (*DefaultDispatcher) Start() error {
 // Close implements common.Closable.
 func (*DefaultDispatcher) Close() error { return nil }
 
-func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *transport.Link, *limiter.Limiter, error) {
+func (d *DefaultDispatcher) ActiveLinkCount() int {
+	total := 0
+	d.LinkManagers.Range(func(_, value interface{}) bool {
+		if lm, ok := value.(*LinkManager); ok {
+			total += lm.Count()
+		}
+		return true
+	})
+	return total
+}
+
+func (d *DefaultDispatcher) CloseAllManagedLinks(reason string, fields logrus.Fields) int {
+	total := 0
+	d.LinkManagers.Range(func(key, value interface{}) bool {
+		lm, ok := value.(*LinkManager)
+		if !ok {
+			return true
+		}
+		linkFields := cloneLogFields(fields)
+		if user, ok := key.(string); ok && user != "" {
+			linkFields["user"] = user
+		}
+		total += lm.CloseAll(reason, linkFields)
+		d.LinkManagers.Delete(key)
+		return true
+	})
+	return total
+}
+
+func (d *DefaultDispatcher) getLink(ctx context.Context, destination net.Destination) (*transport.Link, *transport.Link, *limiter.Limiter, error) {
 	opt := pipe.OptionsFromContext(ctx)
 	uplinkReader, uplinkWriter := pipe.New(opt...)
 	downlinkReader, downlinkWriter := pipe.New(opt...)
@@ -173,6 +204,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 		limit, err = limiter.GetLimiter(sessionInbound.Tag)
 		if err != nil {
 			errors.LogInfo(ctx, "get limiter ", sessionInbound.Tag, " error: ", err)
+			logConnectionDrop("limiter_not_found", "reject_connection", sessionInbound.Tag, user.Email, sessionInbound.Source.Address.IP().String(), destination, limiter.RejectInfo{})
 			common.Close(outboundLink.Writer)
 			common.Close(inboundLink.Writer)
 			common.Interrupt(outboundLink.Reader)
@@ -180,11 +212,12 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 			return nil, nil, nil, errors.New("get limiter ", sessionInbound.Tag, " error: ", err)
 		}
 		// Speed Limit and Device Limit
-		w, reject := limit.CheckLimit(user.Email,
+		w, reject, rejectInfo := limit.CheckLimit(user.Email,
 			sessionInbound.Source.Address.IP().String(),
 			sessionInbound.Source.Network == net.Network_TCP)
 		if reject {
 			errors.LogInfo(ctx, "Limited ", user.Email, " by conn or ip")
+			logConnectionDrop(rejectInfo.Reason, "reject_connection", sessionInbound.Tag, user.Email, sessionInbound.Source.Address.IP().String(), destination, rejectInfo)
 			common.Close(outboundLink.Writer)
 			common.Close(inboundLink.Writer)
 			common.Interrupt(outboundLink.Reader)
@@ -288,7 +321,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		ctx = session.ContextWithContent(ctx, content)
 	}
 	sniffingRequest := content.SniffingRequest
-	inbound, outbound, _, err := d.getLink(ctx)
+	inbound, outbound, _, err := d.getLink(ctx, destination)
 	if err != nil {
 		return nil, err
 	}
@@ -359,16 +392,18 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 		limit, err = limiter.GetLimiter(sessionInbound.Tag)
 		if err != nil {
 			errors.LogInfo(ctx, "get limiter ", sessionInbound.Tag, " error: ", err)
+			logConnectionDrop("limiter_not_found", "reject_connection", sessionInbound.Tag, user.Email, sessionInbound.Source.Address.IP().String(), destination, limiter.RejectInfo{})
 			common.Close(outbound.Writer)
 			common.Interrupt(outbound.Reader)
 			return errors.New("get limiter ", sessionInbound.Tag, " error: ", err)
 		}
 		// Speed Limit and Device Limit
-		w, reject := limit.CheckLimit(user.Email,
+		w, reject, rejectInfo := limit.CheckLimit(user.Email,
 			sessionInbound.Source.Address.IP().String(),
 			sessionInbound.Source.Network == net.Network_TCP)
 		if reject {
 			errors.LogInfo(ctx, "Limited ", user.Email, " by conn or ip")
+			logConnectionDrop(rejectInfo.Reason, "reject_connection", sessionInbound.Tag, user.Email, sessionInbound.Source.Address.IP().String(), destination, rejectInfo)
 			common.Close(outbound.Writer)
 			common.Interrupt(outbound.Reader)
 			return errors.New("Limited ", user.Email, " by conn or ip")
@@ -521,6 +556,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 			handler = h
 		} else {
 			errors.LogError(ctx, "non existing tag for platform initialized detour: ", forcedOutboundTag)
+			logRouteDrop("route_outbound_missing", inTag, forcedOutboundTag, destination)
 			common.Close(link.Writer)
 			common.Interrupt(link.Reader)
 			return
@@ -538,6 +574,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 				handler = h
 			} else {
 				errors.LogWarning(ctx, "non existing outTag: ", outTag)
+				logRouteDrop("route_outbound_missing", inTag, outTag, destination)
 				common.Close(link.Writer)
 				common.Interrupt(link.Reader)
 				return // DO NOT CHANGE: the traffic shouldn't be processed by default outbound if the specified outbound tag doesn't exist (yet), e.g., VLESS Reverse Proxy
@@ -553,6 +590,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 
 	if handler == nil {
 		errors.LogInfo(ctx, "default outbound handler not exist")
+		logRouteDrop("default_outbound_missing", inTag, "", destination)
 		common.Close(link.Writer)
 		common.Interrupt(link.Reader)
 		return
@@ -575,4 +613,55 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	}
 
 	handler.Dispatch(ctx, link)
+}
+
+func logConnectionDrop(reason, action, tag, user, ip string, destination net.Destination, info limiter.RejectInfo) {
+	if reason == "" {
+		reason = "unknown"
+	}
+	fields := logrus.Fields{
+		"event":  "zicnode_disconnect",
+		"reason": reason,
+		"action": action,
+	}
+	if tag != "" {
+		fields["tag"] = tag
+	}
+	if user != "" {
+		fields["user"] = user
+	}
+	if ip != "" {
+		fields["ip"] = ip
+	}
+	if destination.IsValid() {
+		fields["destination"] = destination.String()
+	}
+	if info.UID != 0 {
+		fields["uid"] = info.UID
+	}
+	if info.DeviceLimit != 0 {
+		fields["device_limit"] = info.DeviceLimit
+	}
+	if info.AliveIP != 0 || info.Reason == limiter.RejectDeviceLimitExceeded {
+		fields["alive_ip"] = info.AliveIP
+	}
+	logrus.WithFields(fields).Error("connection dropped by zicnode")
+}
+
+func logRouteDrop(reason, inboundTag, outboundTag string, destination net.Destination) {
+	fields := logrus.Fields{
+		"event":  "zicnode_disconnect",
+		"reason": reason,
+		"action": "close_connection",
+	}
+	if inboundTag != "" {
+		fields["inbound_tag"] = inboundTag
+	}
+	if outboundTag != "" {
+		fields["outbound_tag"] = outboundTag
+	}
+	if destination.IsValid() {
+		fields["destination"] = destination.String()
+	}
+	logrus.WithFields(fields).Error("connection dropped by routing")
 }

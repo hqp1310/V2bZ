@@ -311,6 +311,72 @@ func TestDefaultACMEEmail(t *testing.T) {
 	}
 }
 
+func TestNodeCoreFingerprintIgnoresRuntimeOnlyBaseConfig(t *testing.T) {
+	base := testFingerprintNode()
+	runtimeOnly := cloneTestFingerprintNode(base)
+	runtimeOnly.Common.BaseConfig.PushInterval = 10
+	runtimeOnly.Common.BaseConfig.PullInterval = "20"
+	runtimeOnly.Common.BaseConfig.DeviceOnlineMinTraffic = 4096
+	runtimeOnly.Common.BaseConfig.NodeReportMinTraffic = 8192
+
+	if got, want := runtimeOnly.CoreFingerprint(), base.CoreFingerprint(); got != want {
+		t.Fatalf("runtime-only base_config changed fingerprint: got %q want %q", got, want)
+	}
+
+	coreChanged := cloneTestFingerprintNode(base)
+	coreChanged.Common.ServerPort = 8443
+	if got, old := coreChanged.CoreFingerprint(), base.CoreFingerprint(); got == old {
+		t.Fatal("core-relevant server port change did not change fingerprint")
+	}
+}
+
+func testFingerprintNode() *NodeInfo {
+	return &NodeInfo{
+		Id:       1,
+		Type:     "vless",
+		Security: Tls,
+		Tag:      "vless-1",
+		Common: &CommonNode{
+			Protocol:   "vless",
+			Host:       "example.com",
+			ListenIP:   "0.0.0.0",
+			ServerPort: 443,
+			Routes: []Route{
+				{Id: 1, Match: []string{"example.com"}, Action: "direct"},
+			},
+			BaseConfig: &BaseConfig{
+				Panel:                  "zicboard",
+				NodeType:               "zicnode",
+				PushInterval:           60,
+				PullInterval:           120,
+				DeviceOnlineMinTraffic: 1024,
+				NodeReportMinTraffic:   2048,
+			},
+			Tls: Tls,
+			CertInfo: &CertInfo{
+				CertMode: "file",
+				CertFile: "/tmp/cert.pem",
+				KeyFile:  "/tmp/key.pem",
+			},
+		},
+	}
+}
+
+func cloneTestFingerprintNode(node *NodeInfo) *NodeInfo {
+	cloned := *node
+	common := *node.Common
+	baseConfig := *node.Common.BaseConfig
+	common.BaseConfig = &baseConfig
+	common.Routes = append([]Route(nil), node.Common.Routes...)
+	for i := range common.Routes {
+		common.Routes[i].Match = append([]string(nil), node.Common.Routes[i].Match...)
+	}
+	certInfo := *node.Common.CertInfo
+	common.CertInfo = &certInfo
+	cloned.Common = &common
+	return &cloned
+}
+
 func TestCommonNodeEffectiveSecurityUsesImplicitTLSProtocols(t *testing.T) {
 	tests := []struct {
 		name     string

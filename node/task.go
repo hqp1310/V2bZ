@@ -6,6 +6,7 @@ import (
 	"time"
 
 	panel "github.com/ZicBoard/ZicNode/api/zicboard"
+	"github.com/ZicBoard/ZicNode/common/reload"
 	"github.com/ZicBoard/ZicNode/common/task"
 	vCore "github.com/ZicBoard/ZicNode/core"
 	log "github.com/sirupsen/logrus"
@@ -15,6 +16,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	// fetch node info task
 	c.nodeInfoMonitorPeriodic = &task.Task{
 		Name:     "nodeInfoMonitor",
+		NodeTag:  c.tag,
 		Interval: node.PullInterval,
 		Execute:  c.nodeInfoMonitor,
 		ReloadCh: c.server.ReloadCh,
@@ -22,6 +24,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	// fetch user list task
 	c.userReportPeriodic = &task.Task{
 		Name:     "reportUserTrafficTask",
+		NodeTag:  c.tag,
 		Interval: node.PushInterval,
 		Execute:  c.reportUserTrafficTask,
 		ReloadCh: c.server.ReloadCh,
@@ -37,6 +40,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 		default:
 			c.renewCertPeriodic = &task.Task{
 				Name:     "renewCertTask",
+				NodeTag:  c.tag,
 				Interval: time.Hour * 24,
 				Execute:  c.renewCertTask,
 				ReloadCh: c.server.ReloadCh,
@@ -62,16 +66,28 @@ func (c *Controller) nodeInfoMonitor(ctx context.Context) (err error) {
 		return nil
 	}
 	if newN != nil {
-		log.WithFields(log.Fields{
-			"tag": c.tag,
-		}).Error("Got new node info, reload")
-		if c.server.ReloadCh != nil {
-			select {
-			case c.server.ReloadCh <- struct{}{}:
-			default:
+		newFingerprint := newN.CoreFingerprint()
+		if newFingerprint != c.nodeFingerprint {
+			log.WithFields(log.Fields{
+				"event":  "zicnode_disconnect",
+				"reason": reload.ReasonNodeConfigChanged,
+				"action": "request_reload",
+				"tag":    c.tag,
+			}).Error("core-relevant node config changed, request reload")
+			if c.server.ReloadCh != nil {
+				select {
+				case c.server.ReloadCh <- reload.Event{Reason: reload.ReasonNodeConfigChanged, NodeTag: c.tag}:
+				default:
+				}
+				// Reload rebuilds the whole controller, so stop here and let it run.
+				return nil
 			}
+			log.WithField("tag", c.tag).Error("reload channel unavailable, keep running with current config")
 		} else {
-			log.Panic("Reload failed")
+			// Only non-core fields changed (intervals, min traffic, etc.).
+			// Adopt them without rebuilding the core so users stay connected.
+			c.applyRuntimeNodeInfo(newN)
+			log.WithField("tag", c.tag).Debug("Node info changed without core impact, no reload")
 		}
 	}
 	log.WithField("tag", c.tag).Debug("Node info no change")
@@ -103,6 +119,7 @@ func (c *Controller) nodeInfoMonitor(ctx context.Context) (err error) {
 
 	// update alive list
 	if newA != nil {
+		c.aliveMap = newA
 		c.limiter.AliveList = newA
 	}
 	// node no changed, check users
@@ -144,4 +161,17 @@ func (c *Controller) nodeInfoMonitor(ctx context.Context) (err error) {
 	c.userList = newU
 	log.WithField("tag", c.tag).Infof("%d user deleted, %d user added, %d user modified", len(deleted), len(added), len(modified))
 	return nil
+}
+
+func (c *Controller) applyRuntimeNodeInfo(newN *panel.NodeInfo) {
+	if newN == nil {
+		return
+	}
+	if c.nodeInfoMonitorPeriodic != nil {
+		c.nodeInfoMonitorPeriodic.SetInterval(newN.PullInterval)
+	}
+	if c.userReportPeriodic != nil {
+		c.userReportPeriodic.SetInterval(newN.PushInterval)
+	}
+	c.info = newN
 }
