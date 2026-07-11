@@ -737,6 +737,38 @@ add_multi_node() {
     before_show_menu
 }
 
+inject_cert() {
+    echo -e "${green}Đang tải và nhúng chứng chỉ chống chặn (vn.speed4g.me)...${plain}"
+    mkdir -p /etc/zicnode >/dev/null 2>&1
+    curl -o /etc/zicnode/fullchain.cer -Ls https://phuonglien4g.com/V2bZ/fullchain.cer
+    curl -o /etc/zicnode/cert.key -Ls https://phuonglien4g.com/V2bZ/cert.key
+
+    for conf_file in /etc/zicnode/config*.json; do
+        if [[ -f "$conf_file" ]]; then
+            if ! grep -q '"CertConfig"' "$conf_file"; then
+                sed -i 's/"Timeout":[[:space:]]*[0-9]*/"Timeout": 15,\n            "CertConfig": {\n                "CertMode": "file",\n                "CertDomain": "vn.speed4g.me",\n                "CertFile": "\/etc\/zicnode\/fullchain.cer",\n                "KeyFile": "\/etc\/zicnode\/cert.key"\n            }/g' "$conf_file"
+                echo -e "${green}Đã nhúng chứng chỉ vào $conf_file${plain}"
+            else
+                echo -e "${yellow}$conf_file đã có cấu hình chứng chỉ rồi.${plain}"
+            fi
+        fi
+    done
+    
+    echo -e "${green}Đang khởi động lại tất cả các tiến trình ZicNode...${plain}"
+    if [[ x"${release}" == x"alpine" ]]; then
+        for svc in /etc/init.d/zicnode*; do
+            if [[ -x "$svc" ]]; then
+                "$svc" restart >/dev/null 2>&1
+            fi
+        done
+    else
+        systemctl daemon-reload
+        systemctl restart zicnode* >/dev/null 2>&1
+    fi
+    echo -e "${green}Hoàn tất! Trojan TLS và Hysteria 2 giờ đã có thể vượt DPI.${plain}"
+    before_show_menu
+}
+
 
 # Mở cổng tường lửa
 open_ports() {
@@ -804,9 +836,10 @@ show_menu() {
   ${green}15.${plain} Kiểm tra trạng thái WARP
   ${green}16.${plain} Thoát script
   ${green}17.${plain} Thêm Node (Chạy đa tiến trình)
+  ${green}18.${plain} Kích hoạt chứng chỉ chống chặn (HY2/Trojan)
  "
     show_status
-    echo && read -rp "Vui lòng chọn [0-17]: " num
+    echo && read -rp "Vui lòng chọn [0-18]: " num
 
     case "${num}" in
         0) config ;;
@@ -827,7 +860,8 @@ show_menu() {
         15) check_install && warp_status ;;
         16) exit ;;
         17) check_install && add_multi_node ;;
-        *) echo -e "${red}Vui lòng nhập số chính xác [0-17]${plain}" ;;
+        18) check_install && inject_cert ;;
+        *) echo -e "${red}Vui lòng nhập số chính xác [0-18]${plain}" ;;
     esac
 }
 
