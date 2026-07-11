@@ -404,7 +404,7 @@ EOF
     if [[ ! -f /etc/zicnode/config.json ]]; then
         # Nếu các tham số đầy đủ được truyền qua CLI, cấu hình sẽ được tạo trực tiếp và bỏ qua tương tác
         if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
-            generate_zicnode_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG"
+            generate_multi_node "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG"
             echo -e "${green}Đã tạo tệp /etc/zicnode/config.json dựa trên các tham số được cung cấp${plain}"
             first_install=false
         else
@@ -453,25 +453,21 @@ EOF
     echo "zicnode version      - Xem phiên bản zicnode"
     echo "------------------------------------------"
 
-    if [[ $first_install == true ]]; then
-        read -rp "Phát hiện đây là lần đầu tiên bạn cài đặt zicnode, bạn có muốn tự động tạo tệp cấu hình /etc/zicnode/config.json không? (y/n): " if_generate
-        if [[ "$if_generate" =~ ^[Yy]$ ]]; then
-            # Thu thập các tham số tương tác, cung cấp giá trị mặc định làm ví dụ
-            read -rp "Địa chỉ API của Panel [Định dạng: https://example.com/]: " api_host
-            api_host=${api_host:-https://example.com/}
-            read -rp "Nhập các ID của Node, cách nhau bằng khoảng trắng hoặc phẩy (VD: 2 3 5): " node_id
-            node_id=${node_id:-1}
-            read -rp "Mã bảo mật kết nối Node (Server Token): " api_key
-
-            # Tạo cấu hình (ghi đè lên mẫu có thể đã được sao chép từ gói)
-            generate_multi_node "$api_host" "$node_id" "$api_key"
-        else
-            echo "${green}Đã bỏ qua tự động tạo cấu hình. Để tạo sau này, bạn có thể chạy: zicnode generate${plain}"
-        fi
-    fi
 }
 
 parse_args "$@"
+
+if [[ ! -f /etc/zicnode/config.json && (-z "$API_HOST_ARG" || -z "$NODE_ID_ARG" || -z "$API_KEY_ARG") ]]; then
+    read -rp "Phát hiện đây là lần đầu tiên bạn cài đặt zicnode, bạn có muốn tự động tạo tệp cấu hình không? (y/n): " if_generate
+    if [[ "$if_generate" =~ ^[Yy]$ ]]; then
+        read -rp "Địa chỉ API của Panel [Định dạng: https://example.com/]: " API_HOST_ARG
+        API_HOST_ARG=${API_HOST_ARG:-https://example.com/}
+        read -rp "Nhập các ID của Node, cách nhau bằng khoảng trắng hoặc phẩy (VD: 2 3 5): " NODE_ID_ARG
+        NODE_ID_ARG=${NODE_ID_ARG:-1}
+        read -rp "Mã bảo mật kết nối Node (Server Token): " API_KEY_ARG
+    fi
+fi
+
 echo -e "${green}Bắt đầu cài đặt...${plain}"
 install_base
 install_zicnode "$VERSION_ARG"
