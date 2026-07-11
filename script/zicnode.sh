@@ -685,6 +685,59 @@ generate_config_file() {
     generate_zicnode_config "$api_host" "$node_id" "$api_key"
 }
 
+add_multi_node() {
+    echo "======================================"
+    echo "   TOOL TỰ ĐỘNG THÊM NODE CHO ZICNODE"
+    echo "======================================"
+    read -rp "Nhập Node ID cho giao thức mới: " NEW_NODE_ID
+
+    if ! [[ "$NEW_NODE_ID" =~ ^[0-9]+$ ]]; then
+        echo -e "${red}Lỗi: Node ID phải là số.${plain}"
+        before_show_menu
+        return
+    fi
+
+    CONF_DIR="/etc/zicnode"
+    EXT="json"
+
+    if [ ! -f "$CONF_DIR/config.$EXT" ]; then
+        echo -e "${red}Lỗi: Không tìm thấy file config.json gốc.${plain}"
+        before_show_menu
+        return
+    fi
+
+    count=2
+    while [ -f "$CONF_DIR/config${count}.${EXT}" ]; do
+        ((count++))
+    done
+
+    NEW_CONF="$CONF_DIR/config${count}.${EXT}"
+    NEW_SVC="/etc/systemd/system/zicnode${count}.service"
+
+    echo "[1/3] Đang tự động nhân bản file cấu hình..."
+    cp "$CONF_DIR/config.${EXT}" "$NEW_CONF"
+
+    sed -i -E "s/\"NodeID\":[[:space:]]*[0-9]+/\"NodeID\": ${NEW_NODE_ID}/gi" "$NEW_CONF"
+    sed -i -E "s/\"node_id\":[[:space:]]*[0-9]+/\"node_id\": ${NEW_NODE_ID}/gi" "$NEW_CONF"
+
+    echo "[2/3] Đang khởi tạo Systemd Service (zicnode${count})..."
+    cp /etc/systemd/system/zicnode.service "$NEW_SVC"
+    sed -i "s/config\.${EXT}/config${count}\.${EXT}/g" "$NEW_SVC"
+    sed -i "s/Description=.*/Description=ZicNode ${count} Service/g" "$NEW_SVC"
+
+    echo "[3/3] Đang khởi chạy tiến trình..."
+    systemctl daemon-reload
+    systemctl enable "zicnode${count}" >/dev/null 2>&1
+    systemctl start "zicnode${count}"
+
+    echo "======================================"
+    echo -e "${green}THÀNH CÔNG! Giao thức mới (Node ID: ${NEW_NODE_ID}) đã chạy ngầm với tên: zicnode${count}${plain}"
+    echo "Kiểm tra trạng thái bằng lệnh: systemctl status zicnode${count}"
+    echo "======================================"
+    before_show_menu
+}
+
+
 # Mở cổng tường lửa
 open_ports() {
     systemctl stop firewalld.service 2>/dev/null
@@ -750,9 +803,10 @@ show_menu() {
   ${green}14.${plain} Mở tất cả các cổng mạng của VPS
   ${green}15.${plain} Kiểm tra trạng thái WARP
   ${green}16.${plain} Thoát script
+  ${green}17.${plain} Thêm Node (Chạy đa tiến trình)
  "
     show_status
-    echo && read -rp "Vui lòng chọn [0-16]: " num
+    echo && read -rp "Vui lòng chọn [0-17]: " num
 
     case "${num}" in
         0) config ;;
@@ -772,7 +826,8 @@ show_menu() {
         14) open_ports ;;
         15) check_install && warp_status ;;
         16) exit ;;
-        *) echo -e "${red}Vui lòng nhập số chính xác [0-16]${plain}" ;;
+        17) check_install && add_multi_node ;;
+        *) echo -e "${red}Vui lòng nhập số chính xác [0-17]${plain}" ;;
     esac
 }
 

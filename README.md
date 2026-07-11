@@ -9,7 +9,7 @@ Một backend của ZicBoard dựa trên mã nguồn xray-core đã được ch�
 ### Cài đặt nhanh bằng 1 click
 
 ```bash
-wget -N https://raw.githubusercontent.com/kutycma/zicnode/main/script/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/hqp1310/zicnode/main/script/install.sh && bash install.sh
 ```
 
 ## Biên dịch (Build)
