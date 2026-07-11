@@ -458,13 +458,26 @@ EOF
 parse_args "$@"
 
 if [[ ! -f /etc/zicnode/config.json && (-z "$API_HOST_ARG" || -z "$NODE_ID_ARG" || -z "$API_KEY_ARG") ]]; then
-    read -rp "Phát hiện đây là lần đầu tiên bạn cài đặt zicnode, bạn có muốn tự động tạo tệp cấu hình không? (y/n): " if_generate
+    if [[ -z "$API_HOST_ARG" && -z "$NODE_ID_ARG" && -z "$API_KEY_ARG" ]]; then
+        read -rp "Phát hiện đây là lần đầu tiên bạn cài đặt zicnode, bạn có muốn tự động tạo tệp cấu hình không? (y/n): " if_generate
+    else
+        if_generate="y"
+    fi
+    
     if [[ "$if_generate" =~ ^[Yy]$ ]]; then
-        read -rp "Địa chỉ API của Panel [Định dạng: https://example.com/]: " API_HOST_ARG
-        API_HOST_ARG=${API_HOST_ARG:-https://example.com/}
-        read -rp "Nhập các ID của Node, cách nhau bằng khoảng trắng hoặc phẩy (VD: 2 3 5): " NODE_ID_ARG
-        NODE_ID_ARG=${NODE_ID_ARG:-1}
-        read -rp "Mã bảo mật kết nối Node (Server Token): " API_KEY_ARG
+        if [[ -z "$API_HOST_ARG" ]]; then
+            read -rp "Địa chỉ API của Panel [Định dạng: https://example.com/]: " API_HOST_ARG
+            API_HOST_ARG=${API_HOST_ARG:-https://example.com/}
+        fi
+        
+        if [[ -z "$NODE_ID_ARG" ]]; then
+            read -rp "Nhập các ID của Node, cách nhau bằng khoảng trắng hoặc phẩy (VD: 2 3 5): " NODE_ID_ARG
+            NODE_ID_ARG=${NODE_ID_ARG:-1}
+        fi
+        
+        if [[ -z "$API_KEY_ARG" ]]; then
+            read -rp "Mã bảo mật kết nối Node (Server Token): " API_KEY_ARG
+        fi
     fi
 fi
 
