@@ -819,7 +819,7 @@ show_usage() {
 show_menu() {
     echo -e "
   ${green}Script quản trị đầu cuối ZicNode,${plain} ${red}không áp dụng cho docker${plain}
---- https://github.com/kutycma/zicnode ---
+--- https://github.com/hqp1310/zicnode ---
   ${green}0.${plain} Sửa đổi cấu hình (config.json)
 ——————————————
   ${green}1.${plain} Cài đặt zicnode
