@@ -745,11 +745,11 @@ inject_cert() {
 
     for conf_file in /etc/zicnode/config*.json; do
         if [[ -f "$conf_file" ]]; then
-            if ! grep -q '"CertConfig"' "$conf_file"; then
-                sed -i 's/"Timeout":[[:space:]]*[0-9]*/"Timeout": 15,\n            "CertConfig": {\n                "CertMode": "file",\n                "CertDomain": "vn.speed4g.me",\n                "CertFile": "\/etc\/zicnode\/fullchain.cer",\n                "KeyFile": "\/etc\/zicnode\/cert.key"\n            }/g' "$conf_file"
-                echo -e "${green}Đã nhúng chứng chỉ vào $conf_file${plain}"
+            if ! grep -q '"Certificate"' "$conf_file"; then
+                sed -i 's/"Log":[[:space:]]*{/"Core": {\n        "Certificate": {\n            "Enable": true,\n            "CertFile": "\/etc\/zicnode\/fullchain.cer",\n            "KeyFile": "\/etc\/zicnode\/cert.key"\n        }\n    },\n    "Limit": {\n        "Enable": true,\n        "Redis": {\n            "Host": "",\n            "Password": "",\n            "DB": 0\n        }\n    },\n    "Log": {/' "$conf_file"
+                echo -e "${green}Đã nhúng chứng chỉ Lõi và Vá lỗi Limiter vào $conf_file${plain}"
             else
-                echo -e "${yellow}$conf_file đã có cấu hình chứng chỉ rồi.${plain}"
+                echo -e "${yellow}$conf_file đã có cấu hình chứng chỉ Lõi rồi.${plain}"
             fi
         fi
     done
