@@ -7,7 +7,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
-repo="kutycma/zicnode"
+repo="hqp1310/zicnode"
 script_repo="hqp1310/zicnode"
 
 # check root
