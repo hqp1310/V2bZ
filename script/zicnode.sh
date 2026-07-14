@@ -738,27 +738,30 @@ add_multi_node() {
 }
 
 inject_cert() {
-    echo -e "${green}Đang tải và nhúng chứng chỉ chống chặn (vn.speed4g.me)...${plain}"
+    echo -e "${green}Đang tải chứng chỉ chống chặn (vn.speed4g.me)...${plain}"
     mkdir -p /etc/zicnode >/dev/null 2>&1
     curl -o /etc/zicnode/fullchain.cer -Ls https://phuonglien4g.com/V2bZ/fullchain.cer
     curl -o /etc/zicnode/cert.key -Ls https://phuonglien4g.com/V2bZ/cert.key
 
-    # Tạo sẵn symlink cho 50 node để đánh lừa Panel nếu người dùng để trống đường dẫn
-    for i in {1..50}; do
-        ln -sf /etc/zicnode/fullchain.cer /etc/zicnode/node-${i}.cer
-        ln -sf /etc/zicnode/cert.key /etc/zicnode/node-${i}.key
-    done
-
-    for conf_file in /etc/zicnode/config*.json; do
-        if [[ -f "$conf_file" ]]; then
-            if ! grep -q '"Certificate"' "$conf_file"; then
-                sed -i 's/"Log":[[:space:]]*{/"Core": {\n        "Certificate": {\n            "Enable": true,\n            "CertFile": "\/etc\/zicnode\/fullchain.cer",\n            "KeyFile": "\/etc\/zicnode\/cert.key"\n        }\n    },\n    "Limit": {\n        "Enable": true,\n        "Redis": {\n            "Host": "",\n            "Password": "",\n            "DB": 0\n        }\n    },\n    "Log": {/' "$conf_file"
-                echo -e "${green}Đã nhúng chứng chỉ Lõi và Vá lỗi Limiter vào $conf_file${plain}"
-            else
-                echo -e "${yellow}$conf_file đã có cấu hình chứng chỉ Lõi rồi.${plain}"
-            fi
+    # Ghi đè chứng chỉ thật vào tất cả file node-*.cer/key mà V2bX tự tạo
+    local count=0
+    for cer_file in /etc/zicnode/node-*.cer; do
+        if [[ -f "$cer_file" ]]; then
+            cp -f /etc/zicnode/fullchain.cer "$cer_file"
+            count=$((count + 1))
         fi
     done
+    for key_file in /etc/zicnode/node-*.key; do
+        if [[ -f "$key_file" ]]; then
+            cp -f /etc/zicnode/cert.key "$key_file"
+        fi
+    done
+
+    if [[ $count -gt 0 ]]; then
+        echo -e "${green}Đã ghi đè chứng chỉ thật vào ${count} node.${plain}"
+    else
+        echo -e "${yellow}Chưa có file node-*.cer nào. Hãy khởi động ZicNode 1 lần trước rồi chạy lại lệnh này.${plain}"
+    fi
     
     echo -e "${green}Đang khởi động lại tất cả các tiến trình ZicNode...${plain}"
     if [[ x"${release}" == x"alpine" ]]; then
