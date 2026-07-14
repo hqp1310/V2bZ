@@ -43,6 +43,7 @@ VERSION_ARG=""
 API_HOST_ARG=""
 NODE_ID_ARG=""
 API_KEY_ARG=""
+CERT_MODE_ARG=""
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -54,8 +55,10 @@ parse_args() {
             --api-key)
                 API_KEY_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "Cách dùng: $0 [Phiên bản] [--api-host URL] [--node-id ID] [--api-key KEY]"
+                echo "Cách dùng: $0 [Phiên bản] [--api-host URL] [--node-id ID] [--api-key KEY] [--cert-mode auto|file]"
                 exit 0 ;;
+            --cert-mode)
+                CERT_MODE_ARG="$2"; shift 2 ;;
             --*)
                 echo "Tham số không xác định: $1"; exit 1 ;;
             *)
@@ -254,10 +257,99 @@ EOF
         check_status
         echo -e ""
         if [[ $? == 0 ]]; then
-            echo -e "${green}zicnode khởi động lại thành công${plain}"
+        echo -e "${green}zicnode khởi động lại thành công${plain}"
         else
             echo -e "${red}zicnode có thể đã khởi động thất bại, vui lòng sử dụng lệnh 'zicnode log' để kiểm tra nhật ký lỗi${plain}"
         fi
+}
+
+# ===== CERT FILE CHO vn.speed4g.me =====
+
+install_speed4g_cert() {
+    mkdir -p /etc/zicnode >/dev/null 2>&1
+    cat > /etc/zicnode/speed4g.crt <<'CERTEOF'
+-----BEGIN CERTIFICATE-----
+MIIEFTCCAv2gAwIBAgIUBqZxJFKCZM7ykssyyWgxsBcwvHYwDQYJKoZIhvcNAQEL
+BQAwgagxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQH
+Ew1TYW4gRnJhbmNpc2NvMRkwFwYDVQQKExBDbG91ZGZsYXJlLCBJbmMuMRswGQYD
+VQQLExJ3d3cuY2xvdWRmbGFyZS5jb20xNDAyBgNVBAMTK01hbmFnZWQgQ0EgYjUz
+N2EzYmM1ZWY3ZGRlYzE1ZTMwZDFkYjY0MmEzMDgwHhcNMjIwODA2MTI0MTAwWhcN
+MzIwODAzMTI0MTAwWjAiMQswCQYDVQQGEwJVUzETMBEGA1UEAxMKQ2xvdWRmbGFy
+ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJSEp2z+zSIV8/zfeeCL
+deveMmGVrdXSVbZeIOy1994yoNEARZECcNzxsBytkZ+o0BK3HDQ63dj07Z4xnZMO
+B6CwEqtZcxbteOmxizKgxE2do+xZdxS5BgZVtzby+cyYHUurpLDRR3X1tRQdN3+w
+5h1QDbR3dp/5vMFwIsbU85fDRKD//CCzhfD/fMjccXa6mt3HXyrZqHTkKuO7HDn5
+1y7hrdt63H6PpZ3Bwed+KQOGyflLZQeUwDroIYACYQI4OZsWJ1wdrPJaH+sh9VSX
+igypa6qs4mZTaaLQp8muWS+uVcO2MYJJJCy8pdICJVzQ0+gHCiKQbKP77Qqiwr5p
+KpcCAwEAAaOBuzCBuDATBgNVHSUEDDAKBggrBgEFBQcDAjAMBgNVHRMBAf8EAjAA
+MB0GA1UdDgQWBBR3/v0X2f42uTcrAyevdR1ewnMXNzAfBgNVHSMEGDAWgBQzdk4L
+SIWDvC1LW701KtYHtybB0zBTBgNVHR8ETDBKMEigRqBEhkJodHRwOi8vY3JsLmNs
+b3VkZmxhcmUuY29tLzViOTUzZDk3LTMwMWMtNGQwZC1hODViLWY0MmU1MWE5MmE0
+MS5jcmwwDQYJKoZIhvcNAQELBQADggEBAAamFuE52CKEUzV/AjVBLtyEwskYK17I
+FX/Fl+EoD9JpuB5gal/tGiP9AeMk1qbWfQaOVP48KKUuuFdXWVB/xOPU54Y8KXS0
+ST7cCRfzJRlNzA6fCM6CfS3IO7XmfdS+cqWn1CTzGK4Nj+g6MikqY6C2M9yAW4iA
+OWqwFlKGCzYvVYMmPpPrl37vCZgab2BEo7lx6CLu7qYr5cBn2A6TQ9ntaRLgUlLV
+wnBnP5eqqcqAAuHmZvWsOr2nT+1xyO0VVbZtk82TWtn8+KdVIP1Wdiy573j8NpzO
+1AwjVJrHnfs2re1n/mUs4/HVQVZuwMLuaCF7kIZrPuhJH7p1LvQHBhA=
+-----END CERTIFICATE-----
+CERTEOF
+
+    cat > /etc/zicnode/speed4g.key <<'KEYEOF'
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCUhKds/s0iFfP8
+33ngi3Xr3jJhla3V0lW2XiDstffeMqDRAEWRAnDc8bAcrZGfqNAStxw0Ot3Y9O2e
+MZ2TDgegsBKrWXMW7XjpsYsyoMRNnaPsWXcUuQYGVbc28vnMmB1Lq6Sw0Ud19bUU
+HTd/sOYdUA20d3af+bzBcCLG1POXw0Sg//wgs4Xw/3zI3HF2uprdx18q2ah05Crj
+uxw5+dcu4a3betx+j6WdwcHnfikDhsn5S2UHlMA66CGAAmECODmbFidcHazyWh/r
+IfVUl4oMqWuqrOJmU2mi0KfJrlkvrlXDtjGCSSQsvKXSAiVc0NPoBwoikGyj++0K
+osK+aSqXAgMBAAECggEAEC/xK6EN7KQl5q7Y0s+Ad8fNB/PPcZmuO+VAg2xF6tLr
+0jvMWUTB1mMFRerpD1TP8OpCSbMM0QPJDk/sE8YYsLvgHQrvz1Tss9PlDwyUuLzw
+y+boYrrT3EblZDjRXypJLyEzHw6AUmwIY3vXu7QlMJa0F7JZnJAUsaSuNauqLSUx
+uDqiF72+6Iu5oKmU8kxUxTSbLVCP28I0nPPyDzm6KwO56lZDdaVPPI/ybo9F6O/u
+8bm+Ld+0/BhYtv2OvfMZwpclSEqYe6RgKWb0ph/xG/IuONrCCbP676ofU+E//fOn
+n7oabShlso2N+TCzXO6SFF7cYSuGjN15ydbDIwohwQKBgQDOQx0JfcAk3ZJhyfke
+PW8eviVm3z/y0JII3Ns88BSN97/1JcoJCHEpMRFvw8lm//gQKL5S+6BLaq1/x2tR
+tc7qXnuJrmIbZJQ8d4LsGOiqgcHOmyvlwXj/BR/DkBb4Igmefpdk2n/JXKlMBMj0
+RtIVvmuzET/sqkpdylWK2XcH9wKBgQC4VOn/IYp0T6Y6IEheu4ZdyMfWm/YiAiVS
+C7qG+XrddLUYXM2KY2tUZYzXFcZyFbKkG7edeam8iO7Nd/94HDaSTZhc1Ghbm27O
+Watc6jwt2v7Cebtx0md+KT8+05uc3KDAwPRukWSv9/3UDwALSeSLPKzpCji/nKdk
+xTW1aRyKYQKBgQCyFbAUacZkDgo89C1qtpAicvnIACkudHYhwM5ppr+Yc7gA6Ueu
+1OMfNYZggSJ7E7YR/ZuV+jtD4i86i+tU+SxVno37Kdz62bRDIMyhHECGNtImmEMm
+dA0L4liyeM3cH0c+2P3NzflW2fIx+E+o2Ry6OVaznMkchUr//5or7+adsQKBgAd5
+2iuwzo69FD7TRFwjOuXe2MwJc0gZ0i2rsBr9T1BgBWBBk0yDj7zSiY3Hok7KNn6V
+aTMH1iyBWT4YGdJjQotYfk91he4BNdNEq8CO93Xcpex5R3LsV6o0Pg5sQqlwAU0Q
+Blndp7nDUxYgrZ3Hl29WPKUO9xI+ZkOeA/mhk7jBAoGAEqoMsgPDMrqIgWbwD+HI
+A2JNCeInSagiXKrqNEdokTjQQ78f1MIeYO8WQdqmVCoi3gJRfK5qyIAGP5xVpo7K
+oGT463qBxRavBMrzaL9EZuMHNwga/mgDfFjY0pxDGItp+SxYtT8f0JgnIbbCZ2IX
+gnAexGvAah/QWZZvzduv5TI=
+-----END PRIVATE KEY-----
+KEYEOF
+
+    chmod 644 /etc/zicnode/speed4g.crt
+    chmod 600 /etc/zicnode/speed4g.key
+    echo -e "${green}✓ Đã cài đặt chứng chỉ vn.speed4g.me:${plain}"
+    echo -e "  Cert: /etc/zicnode/speed4g.crt"
+    echo -e "  Key:  /etc/zicnode/speed4g.key"
+    echo ""
+    echo -e "${yellow}Lưu ý: Trên Panel ZicBoard cần cấu hình:${plain}"
+    echo -e "  - Chế độ chứng chỉ: ${green}file${plain}"
+    echo -e "  - Đường dẫn cert:   ${green}/etc/zicnode/speed4g.crt${plain}"
+    echo -e "  - Đường dẫn key:    ${green}/etc/zicnode/speed4g.key${plain}"
+}
+
+prompt_cert_mode() {
+    echo ""
+    echo -e "${green}Chọn chế độ chứng chỉ SSL:${plain}"
+    echo -e "  ${green}1.${plain} Auto TLS (tự động xin cert - mặc định)"
+    echo -e "  ${green}2.${plain} File (dùng cert vn.speed4g.me có sẵn)"
+    echo ""
+    read -rp "Chọn [1/2, mặc định: 1]: " cert_mode_choice
+    cert_mode_choice=${cert_mode_choice:-1}
+    if [[ "$cert_mode_choice" == "2" ]]; then
+        CERT_MODE_ARG="file"
+    else
+        CERT_MODE_ARG="auto"
+    fi
 }
 
 generate_multi_node() {
@@ -406,6 +498,10 @@ EOF
         if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
             generate_multi_node "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG"
             echo -e "${green}Đã tạo tệp /etc/zicnode/config.json dựa trên các tham số được cung cấp${plain}"
+            # Cài đặt cert nếu chọn file mode
+            if [[ "$CERT_MODE_ARG" == "file" ]]; then
+                install_speed4g_cert
+            fi
             first_install=false
         else
             cp config.json /etc/zicnode/
@@ -477,6 +573,11 @@ if [[ ! -f /etc/zicnode/config.json && (-z "$API_HOST_ARG" || -z "$NODE_ID_ARG" 
         
         if [[ -z "$API_KEY_ARG" ]]; then
             read -rp "Mã bảo mật kết nối Node (Server Token): " API_KEY_ARG
+        fi
+
+        # Hỏi chế độ cert
+        if [[ -z "$CERT_MODE_ARG" ]]; then
+            prompt_cert_mode
         fi
     fi
 fi

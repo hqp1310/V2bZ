@@ -930,6 +930,9 @@ func (t TlsSettings) PrimaryServerName() string {
 }
 
 func (c CommonNode) CertTarget() string {
+	if dest := strings.TrimSpace(c.TlsSettings.Dest); dest != "" {
+		return dest
+	}
 	if target := strings.TrimSpace(c.TlsSettings.PrimaryServerName()); target != "" {
 		return target
 	}
