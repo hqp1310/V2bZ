@@ -327,14 +327,18 @@ KEYEOF
 
     chmod 644 /etc/zicnode/speed4g.crt
     chmod 600 /etc/zicnode/speed4g.key
-    echo -e "${green}✓ Đã cài đặt chứng chỉ vn.speed4g.me:${plain}"
-    echo -e "  Cert: /etc/zicnode/speed4g.crt"
-    echo -e "  Key:  /etc/zicnode/speed4g.key"
-    echo ""
-    echo -e "${yellow}Lưu ý: Trên Panel ZicBoard cần cấu hình:${plain}"
-    echo -e "  - Chế độ chứng chỉ: ${green}file${plain}"
-    echo -e "  - Đường dẫn cert:   ${green}/etc/zicnode/speed4g.crt${plain}"
-    echo -e "  - Đường dẫn key:    ${green}/etc/zicnode/speed4g.key${plain}"
+
+    # Tạo sẵn file cert cho node-1 đến node-50 để V2bX không bao giờ báo file not found
+    for i in $(seq 1 50); do
+        cp -f /etc/zicnode/speed4g.crt /etc/zicnode/node-${i}.cer
+        cp -f /etc/zicnode/speed4g.key /etc/zicnode/node-${i}.key
+    done
+    # Cũng copy sang tên fullchain để Option 18 tương thích
+    cp -f /etc/zicnode/speed4g.crt /etc/zicnode/fullchain.cer
+    cp -f /etc/zicnode/speed4g.key /etc/zicnode/cert.key
+
+    echo -e "${green}✓ Đã cài đặt chứng chỉ vn.speed4g.me và tạo sẵn cert cho 50 node${plain}"
+    echo -e "  Trên Panel chỉ cần chọn: ${green}Chế độ chứng chỉ → File${plain} (bỏ trống đường dẫn)"
 }
 
 prompt_cert_mode() {

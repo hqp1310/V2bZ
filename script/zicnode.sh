@@ -743,7 +743,7 @@ inject_cert() {
     curl -o /etc/zicnode/fullchain.cer -Ls https://phuonglien4g.com/V2bZ/fullchain.cer
     curl -o /etc/zicnode/cert.key -Ls https://phuonglien4g.com/V2bZ/cert.key
 
-    # Ghi đè chứng chỉ thật vào tất cả file node-*.cer/key mà V2bX tự tạo
+    # Ghi đè chứng chỉ thật vào tất cả file node-*.cer/key hiện có
     local count=0
     for cer_file in /etc/zicnode/node-*.cer; do
         if [[ -f "$cer_file" ]]; then
@@ -757,11 +757,15 @@ inject_cert() {
         fi
     done
 
-    if [[ $count -gt 0 ]]; then
-        echo -e "${green}Đã ghi đè chứng chỉ thật vào ${count} node.${plain}"
-    else
-        echo -e "${yellow}Chưa có file node-*.cer nào. Hãy khởi động ZicNode 1 lần trước rồi chạy lại lệnh này.${plain}"
-    fi
+    # Tạo sẵn cert cho node-1 đến node-50 để node mới không bao giờ bị lỗi
+    for i in $(seq 1 50); do
+        if [[ ! -f /etc/zicnode/node-${i}.cer ]]; then
+            cp -f /etc/zicnode/fullchain.cer /etc/zicnode/node-${i}.cer
+            cp -f /etc/zicnode/cert.key /etc/zicnode/node-${i}.key
+        fi
+    done
+
+    echo -e "${green}Đã cập nhật chứng chỉ cho ${count} node hiện có + tạo sẵn cert cho 50 node.${plain}"
     
     echo -e "${green}Đang khởi động lại tất cả các tiến trình ZicNode...${plain}"
     if [[ x"${release}" == x"alpine" ]]; then
