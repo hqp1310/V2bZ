@@ -135,22 +135,79 @@ update() {
     fi
 }
 
+get_existing_nodes() {
+    local nodes=()
+    if [[ -f /etc/zicnode/config.json ]]; then
+        nodes+=(1)
+    fi
+    for f in /etc/zicnode/config*.json; do
+        if [[ "$f" =~ config([0-9]+)\.json ]]; then
+            nodes+=("${BASH_REMATCH[1]}")
+        fi
+    done
+    if [[ ${#nodes[@]} -gt 0 ]]; then
+        echo "${nodes[@]}" | tr ' ' '\n' | sort -nu | tr '\n' ' '
+    fi
+}
+
+select_node() {
+    local action="$1"
+    local nodes=($(get_existing_nodes))
+    if [[ ${#nodes[@]} -eq 0 ]]; then
+        echo -e "${red}Không tìm thấy node nào được cài đặt!${plain}" >&2
+        echo "-1"
+        return
+    elif [[ ${#nodes[@]} -eq 1 ]]; then
+        echo "${nodes[0]}"
+        return
+    fi
+
+    echo -e "${green}Danh sách các Node hiện có:${plain}" >&2
+    for n in "${nodes[@]}"; do
+        local conf_file="/etc/zicnode/config.json"
+        if [[ "$n" -gt 1 ]]; then conf_file="/etc/zicnode/config${n}.json"; fi
+        local node_id=$(json_value_from_file "$conf_file" '.Nodes[0].NodeID')
+        echo -e "  ${green}${n}.${plain} zicnode${n} (NodeID: ${node_id:-không rõ})" >&2
+    done
+    echo -e "  ${green}0.${plain} Tất cả các Node" >&2
+    echo "" >&2
+    local sel
+    read -rp "Vui lòng chọn Node để ${action} [0-${nodes[-1]}, mặc định: 0]: " sel >&2
+    sel=${sel:-0}
+    echo "$sel"
+}
+
 config() {
-    echo "zicnode sẽ tự động thử khởi động lại sau khi sửa đổi cấu hình"
-    nano /etc/zicnode/config.json
+    local node_choice=$(select_node "sửa cấu hình")
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    if [[ "$node_choice" == "0" ]]; then
+        echo -e "${yellow}Không thể sửa cấu hình tất cả các Node cùng lúc. Vui lòng chọn 1 Node cụ thể.${plain}"
+        if [[ $# == 0 ]]; then before_show_menu; fi
+        return
+    fi
+    local conf_file="/etc/zicnode/config.json"
+    if [[ "$node_choice" -gt 1 ]]; then conf_file="/etc/zicnode/config${node_choice}.json"; fi
+    echo "zicnode${node_choice} sẽ tự động thử khởi động lại sau khi sửa đổi cấu hình"
+    nano "$conf_file"
     sleep 2
-    restart
-    check_status
+    local svc_name="zicnode"
+    if [[ "$node_choice" -gt 1 ]]; then svc_name="zicnode${node_choice}"; fi
+    if [[ x"${release}" == x"alpine" ]]; then
+        service "$svc_name" restart
+    else
+        systemctl restart "$svc_name"
+    fi
+    check_status "$svc_name"
     case $? in
         0)
-            echo -e "Trạng thái zicnode: ${green}Đang chạy${plain}"
+            echo -e "Trạng thái ${svc_name}: ${green}Đang chạy${plain}"
             ;;
         1)
-            echo -e "Phát hiện bạn chưa khởi động zicnode hoặc khởi động lại thất bại, bạn có muốn xem logs không? [Y/n]" && echo
+            echo -e "Phát hiện khởi động lại thất bại, bạn có muốn xem logs không? [Y/n]" && echo
             read -e -rp "(Mặc định: y):" yn
             [[ -z ${yn} ]] && yn="y"
             if [[ ${yn} == [Yy] ]]; then
-               show_log
+               show_log "$node_choice"
             fi
             ;;
         2)
@@ -190,117 +247,218 @@ uninstall() {
 }
 
 start() {
-    check_status
-    if [[ $? == 0 ]]; then
-        echo ""
-        echo -e "${green}zicnode đã chạy, không cần khởi động lại, nếu muốn khởi động lại vui lòng chọn chức năng khởi động lại${plain}"
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "khởi động")
+    fi
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        if [[ x"${release}" == x"alpine" ]]; then
-            service zicnode start
-        else
-            systemctl start zicnode
-        fi
-        sleep 2
-        check_status
-        if [[ $? == 0 ]]; then
-            echo -e "${green}zicnode đã khởi động thành công, vui lòng dùng 'zicnode log' để xem nhật ký hoạt động${plain}"
-        else
-            echo -e "${red}zicnode có thể đã khởi động thất bại, vui lòng dùng 'zicnode log' để kiểm tra lỗi sau${plain}"
-        fi
+        nodes_to_process=("$node_choice")
     fi
 
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        
+        check_status "$svc_name"
+        if [[ $? == 0 ]]; then
+            echo -e "${green}${svc_name} đã chạy, không cần khởi động lại${plain}"
+        else
+            if [[ x"${release}" == x"alpine" ]]; then
+                service "$svc_name" start
+            else
+                systemctl start "$svc_name"
+            fi
+            sleep 2
+            check_status "$svc_name"
+            if [[ $? == 0 ]]; then
+                echo -e "${green}${svc_name} đã khởi động thành công${plain}"
+            else
+                echo -e "${red}${svc_name} có thể đã khởi động thất bại, vui lòng dùng lệnh xem log để kiểm tra${plain}"
+            fi
+        fi
+    done
+
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 stop() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service zicnode stop
-    else
-        systemctl stop zicnode
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "dừng")
     fi
-    sleep 2
-    check_status
-    if [[ $? == 1 ]]; then
-        echo -e "${green}zicnode đã dừng thành công${plain}"
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        echo -e "${red}zicnode dừng thất bại, có thể do thời gian dừng vượt quá 2 giây, vui lòng kiểm tra lại logs sau${plain}"
+        nodes_to_process=("$node_choice")
     fi
 
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        
+        if [[ x"${release}" == x"alpine" ]]; then
+            service "$svc_name" stop
+        else
+            systemctl stop "$svc_name"
+        fi
+        echo -e "${green}Đã dừng ${svc_name}${plain}"
+    done
+    sleep 2
+
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 restart() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service zicnode restart
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "khởi động lại")
+    fi
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        systemctl restart zicnode
+        nodes_to_process=("$node_choice")
     fi
-    sleep 2
-    check_status
-    if [[ $? == 0 ]]; then
-        echo -e "${green}zicnode khởi động lại thành công, vui lòng dùng 'zicnode log' để xem nhật ký hoạt động${plain}"
-    else
-        echo -e "${red}zicnode có thể đã khởi động thất bại, vui lòng dùng 'zicnode log' để kiểm tra lỗi${plain}"
-    fi
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        
+        if [[ x"${release}" == x"alpine" ]]; then
+            service "$svc_name" restart
+        else
+            systemctl restart "$svc_name"
+        fi
+        sleep 2
+        check_status "$svc_name"
+        if [[ $? == 0 ]]; then
+            echo -e "${green}${svc_name} khởi động lại thành công${plain}"
+        else
+            echo -e "${red}${svc_name} khởi động thất bại, vui lòng xem log${plain}"
+        fi
+    done
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 status() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service zicnode status
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "xem trạng thái")
+    fi
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        systemctl status zicnode --no-pager -l
+        nodes_to_process=("$node_choice")
     fi
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        echo -e "\n--- Trạng thái ${svc_name} ---"
+        if [[ x"${release}" == x"alpine" ]]; then
+            service "$svc_name" status
+        else
+            systemctl status "$svc_name" --no-pager -l
+        fi
+    done
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 enable() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update add zicnode
-    else
-        systemctl enable zicnode
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "bật tự khởi động")
     fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}zicnode đã thiết lập tự khởi động cùng hệ thống thành công${plain}"
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        echo -e "${red}zicnode thiết lập tự khởi động cùng hệ thống thất bại${plain}"
+        nodes_to_process=("$node_choice")
     fi
 
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        
+        if [[ x"${release}" == x"alpine" ]]; then
+            rc-update add "$svc_name"
+        else
+            systemctl enable "$svc_name"
+        fi
+        if [[ $? == 0 ]]; then
+            echo -e "${green}${svc_name} đã thiết lập tự khởi động thành công${plain}"
+        else
+            echo -e "${red}${svc_name} thiết lập tự khởi động thất bại${plain}"
+        fi
+    done
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 disable() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update del zicnode
-    else
-        systemctl disable zicnode
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "tắt tự khởi động")
     fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}zicnode đã hủy tự khởi động cùng hệ thống thành công${plain}"
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    
+    local nodes_to_process=()
+    if [[ "$node_choice" == "0" ]]; then
+        nodes_to_process=($(get_existing_nodes))
     else
-        echo -e "${red}zicnode hủy tự khởi động cùng hệ thống thất bại${plain}"
+        nodes_to_process=("$node_choice")
     fi
 
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    for n in "${nodes_to_process[@]}"; do
+        local svc_name="zicnode"
+        if [[ "$n" -gt 1 ]]; then svc_name="zicnode${n}"; fi
+        
+        if [[ x"${release}" == x"alpine" ]]; then
+            rc-update del "$svc_name"
+        else
+            systemctl disable "$svc_name"
+        fi
+        if [[ $? == 0 ]]; then
+            echo -e "${green}${svc_name} đã hủy tự khởi động thành công${plain}"
+        else
+            echo -e "${red}${svc_name} hủy tự khởi động thất bại${plain}"
+        fi
+    done
+    if [[ $# == 0 ]]; then before_show_menu; fi
 }
 
 show_log() {
+    local node_choice=${1:-""}
+    if [[ -z "$node_choice" || "$node_choice" == "0" ]]; then
+        node_choice=$(select_node "xem log")
+    fi
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    if [[ "$node_choice" == "0" ]]; then
+        echo -e "${yellow}Chỉ hỗ trợ xem log của 1 Node cụ thể. Đang chọn Node 1.${plain}"
+        node_choice=1
+    fi
+    
+    local svc_name="zicnode"
+    if [[ "$node_choice" -gt 1 ]]; then svc_name="zicnode${node_choice}"; fi
+
     if [[ x"${release}" == x"alpine" ]]; then
-        echo -e "${red}Hệ thống Alpine tạm thời chưa hỗ trợ xem logs${plain}\n" && exit 1
+        echo -e "${red}Hệ thống Alpine tạm thời chưa hỗ trợ xem logs${plain}\n"
     else
-        journalctl -u zicnode.service -e --no-pager -f
+        journalctl -u "${svc_name}.service" -n 100 --no-pager -f
     fi
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -533,18 +691,19 @@ update_shell() {
 
 # 0: running, 1: not running, 2: not installed
 check_status() {
+    local svc_name=${1:-"zicnode"}
     if [[ ! -f /usr/local/zicnode/zicnode ]]; then
         return 2
     fi
     if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(service zicnode status | awk '{print $3}')
+        temp=$(service "$svc_name" status 2>/dev/null | awk '{print $3}')
         if [[ x"${temp}" == x"started" ]]; then
             return 0
         else
             return 1
         fi
     else
-        temp=$(systemctl status zicnode | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+        temp=$(systemctl status "$svc_name" 2>/dev/null | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
         if [[ x"${temp}" == x"running" ]]; then
             return 0
         else
@@ -554,15 +713,16 @@ check_status() {
 }
 
 check_enabled() {
+    local svc_name=${1:-"zicnode"}
     if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(rc-update show | grep zicnode)
+        temp=$(rc-update show | grep "$svc_name")
         if [[ x"${temp}" == x"" ]]; then
             return 1
         else
             return 0
         fi
     else
-        temp=$(systemctl is-enabled zicnode)
+        temp=$(systemctl is-enabled "$svc_name" 2>/dev/null)
         if [[ x"${temp}" == x"enabled" ]]; then
             return 0
         else
@@ -706,10 +866,13 @@ add_multi_node() {
         return
     fi
 
-    count=2
-    while [ -f "$CONF_DIR/config${count}.${EXT}" ]; do
-        ((count++))
-    done
+    count=$NEW_NODE_ID
+
+    if [ -f "$CONF_DIR/config${count}.${EXT}" ]; then
+        echo -e "${red}Lỗi: Node ID ${count} đã tồn tại (file config${count}.${EXT} đã có). Vui lòng chọn Node ID khác hoặc xoá Node cũ trước.${plain}"
+        before_show_menu
+        return
+    fi
 
     NEW_CONF="$CONF_DIR/config${count}.${EXT}"
     NEW_SVC="/etc/systemd/system/zicnode${count}.service"
@@ -800,6 +963,45 @@ open_ports() {
     echo -e "${green}Đã mở tất cả các cổng tường lửa thành công!${plain}"
 }
 
+remove_node() {
+    local node_choice=$(select_node "xoá (gỡ bỏ)")
+    if [[ "$node_choice" == "-1" ]]; then return; fi
+    if [[ "$node_choice" == "0" ]]; then
+        echo -e "${yellow}Tính năng này chỉ dùng để xoá một node phụ. Nếu bạn muốn xoá tất cả, vui lòng dùng tính năng Gỡ cài đặt (menu 3).${plain}"
+        if [[ $# == 0 ]]; then before_show_menu; fi
+        return
+    fi
+    if [[ "$node_choice" == "1" ]]; then
+        echo -e "${yellow}Bạn đang chọn Node gốc. Để xoá Node gốc, vui lòng dùng tính năng Gỡ cài đặt zicnode (menu 3).${plain}"
+        if [[ $# == 0 ]]; then before_show_menu; fi
+        return
+    fi
+    
+    confirm "Bạn có chắc chắn muốn xoá Node $node_choice (zicnode${node_choice}) không?" "n"
+    if [[ $? != 0 ]]; then
+        if [[ $# == 0 ]]; then before_show_menu; fi
+        return 0
+    fi
+    
+    local svc_name="zicnode${node_choice}"
+    if [[ x"${release}" == x"alpine" ]]; then
+        service "$svc_name" stop
+        rc-update del "$svc_name"
+        rm "/etc/init.d/$svc_name" -f
+    else
+        systemctl stop "$svc_name"
+        systemctl disable "$svc_name"
+        rm "/etc/systemd/system/${svc_name}.service" -f
+        systemctl daemon-reload
+        systemctl reset-failed
+    fi
+    
+    rm "/etc/zicnode/config${node_choice}.json" -f
+    echo -e "${green}Đã gỡ bỏ thành công $svc_name.${plain}"
+    
+    if [[ $# == 0 ]]; then before_show_menu; fi
+}
+
 show_usage() {
     echo "Cách sử dụng Script quản trị zicnode: "
     echo "------------------------------------------"
@@ -817,6 +1019,7 @@ show_usage() {
     echo "zicnode update x.x.x - Cài đặt zicnode phiên bản chỉ định"
     echo "zicnode install      - Cài đặt zicnode"
     echo "zicnode uninstall    - Gỡ cài đặt zicnode"
+    echo "zicnode remove       - Xóa một Node phụ"
     echo "zicnode version      - Xem phiên bản zicnode"
     echo "zicnode warp         - Kiểm tra trạng thái WARP"
     echo "zicnode warp_status  - Kiểm tra trạng thái WARP"
@@ -850,9 +1053,10 @@ show_menu() {
   ${green}16.${plain} Thoát script
   ${green}17.${plain} Thêm Node (Chạy đa tiến trình)
   ${green}18.${plain} Kích hoạt chứng chỉ chống chặn (HY2/Trojan)
+  ${green}19.${plain} Xóa một Node phụ
  "
     show_status
-    echo && read -rp "Vui lòng chọn [0-18]: " num
+    echo && read -rp "Vui lòng chọn [0-19]: " num
 
     case "${num}" in
         0) config ;;
@@ -874,7 +1078,8 @@ show_menu() {
         16) exit ;;
         17) check_install && add_multi_node ;;
         18) check_install && inject_cert ;;
-        *) echo -e "${red}Vui lòng nhập số chính xác [0-18]${plain}" ;;
+        19) check_install && remove_node ;;
+        *) echo -e "${red}Vui lòng nhập số chính xác [0-19]${plain}" ;;
     esac
 }
 
@@ -897,6 +1102,7 @@ if [[ $# > 0 ]]; then
         "warp") check_install 0 && warp_status 0 ;;
         "warp_status") check_install 0 && warp_status 0 ;;
         "update_shell") update_shell ;;
+        "remove") check_install 0 && remove_node 0 ;;
         *) show_usage
     esac
 else

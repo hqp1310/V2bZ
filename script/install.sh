@@ -374,6 +374,7 @@ generate_multi_node() {
             echo -e "${green}Đang tạo thêm Node ID: $nid...${plain}"
             CONF_DIR="/etc/zicnode"
             EXT="json"
+            count="$nid"
             NEW_CONF="$CONF_DIR/config${count}.${EXT}"
             
             cp "$CONF_DIR/config.${EXT}" "$NEW_CONF"
@@ -399,7 +400,6 @@ generate_multi_node() {
                 systemctl start "zicnode${count}"
             fi
             echo -e "${green}Khởi chạy thành công zicnode${count} cho Node ID: ${nid}${plain}"
-            ((count++))
         fi
     done
     echo -e "${green}Đã hoàn tất thiết lập tất cả các Node!${plain}"
